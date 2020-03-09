@@ -416,8 +416,10 @@ Function FindSubFolderSize_LC(DF)
 	string DFolder=getdatafolder(1)	
 	if(stringmatch(DF,"root"))
 		setdatafolder root:
-	else
+	elseif(datafolderexists(DF))
 		setdatafolder $DF
+	else
+		return 0
 	endif
 	if (CountObjects("",4)==0)//no subfolders
 		return FindWavesMb_LC()		
@@ -543,9 +545,9 @@ End
 function GraphControlInit()
 	string DF=getdatafolder(1)
 	newdatafolder/o/s root:GraphControl
-	make/o/n=(0,8)/t listtext
+	make/o/n=(0,9)/t listtext
 	make/o/n=0 listselect
-	make/o/n=8/t listtitle={"Pos","Color","Y wave","X Wave","Y DF","X DF","Y Axis","X Axis"}
+	make/o/n=9/t listtitle={"Pos","Color","Y wave","X Wave","Y DF","X DF","Y Axis","X Axis","Size"}
 	make/t/o/n=(0,0) LeftFolderListText,RightFolderListText
 	make/o/n=(1,2,3) LeftFolderListSelect,RightFolderListSelect,DFSelectSave
 	make/t/o/n=0 ImageListText
@@ -598,7 +600,7 @@ function GraphControlInit()
 	SetWindow GraphControl,hook(newgraphcontrol)=GraphControlPanelHook	
 	SetWindow GraphControl,userdata(showTraces)="1"
 	//PopulateDFLists(-1)
-
+	PopupMenu PLOT_SUBWINDOW value=#"root:graphcontrol:subplotwindows",win=GraphControl
 	ListBox PLOT_TRACE_LIST,listWave=root:graphcontrol:listtext,win=GraphControl
 	ListBox PLOT_TRACE_LIST,selWave=root:graphcontrol:listselect,win=GraphControl
 	ListBox PLOT_TRACE_LIST,titleWave=root:graphcontrol:listtitle,mode= 9,win=GraphControl
@@ -651,22 +653,25 @@ Function/s WorkingPlotName()
 	setdatafolder root:GraphControl
 	svar PlotName,SubPlotWindows
 	setdatafolder DF
-	dowindow GraphControl
-	if(v_flag)
-		controlinfo/w=GraphControl PLOT_SUBWINDOW
-		if( (stringmatch(s_value,"_none_"))||(stringmatch(s_value,"")))
-			return PlotName
+	if(strlen(PlotName)>0)
+		dowindow GraphControl
+		if(v_flag)
+			controlinfo/w=GraphControl PLOT_SUBWINDOW
+			if( (stringmatch(s_value,"_none_"))||(stringmatch(s_value,"")))
+				return PlotName
+			else
+				return PlotName+"#"+s_value
+			endif
 		else
-			return PlotName+"#"+s_value
+			return ""
 		endif
-	else
-		return ""
+		else
+			return ""
 	endif
-	
 end
 
 //---change subwindow
-Function SUbwindow_PopMenuProc(ctrlName,popNum,popStr) : PopupMenuControl
+Function Subwindow_PopMenuProc(ctrlName,popNum,popStr) : PopupMenuControl
 	String ctrlName
 	Variable popNum
 	String popStr
@@ -693,7 +698,7 @@ function GraphControlPanelUpdate([update])
 		make/t/n=2/o CurrentDF=DF
 		variable CurrGCCol=0
 		setdatafolder $DF
-		FindTopPLot()	//---the plot to work on
+		
 		//----draw envoronment
 		setdrawlayer /w=GraphControl userback
 		drawaction/w=GraphControl delete
@@ -705,7 +710,9 @@ function GraphControlPanelUpdate([update])
 		variable showPlotArea=stringmatch(S_UserData,"active")
 		//---plot name
 		SetVariable PLOT_NAME,pos={2,77},size={plotWidth-210,18.00},proc=PLOTSIZE,title="Name: ",win=GraphControl,disable=showPlotArea
-		PopupMenu PLOT_SUBWINDOW pos={plotWidth-200,77},value=#"root:graphcontrol:subplotwindows",win=GraphControl,disable=showPlotArea
+		FindTopPLot()	//---the plot to work on
+		PopupMenu PLOT_SUBWINDOW pos={plotWidth-200,77},value=#"root:graphcontrol:subplotwindows",proc=Subwindow_PopMenuProc,win=GraphControl,disable=showPlotArea
+		
 		//---plot size
 		SetVariable PLOT_SIZEW,pos={9,100},size={90.00,18.00},proc=PLOTSIZE,title="Width",win=GraphControl,disable=showPlotArea
 		SetVariable PLOT_SIZEW,valueBackColor=(56576,56576,56576),win=GraphControl,disable=showPlotArea
@@ -788,6 +795,9 @@ function GraphControlPanelUpdate([update])
 		SetVariable TRACE_MARKERSIZE,limits={0,10,1},value= _NUM:0,win=GraphControl,disable=showMarkerArea
 		PopupMenu TRACE_MARKER,pos={115.00,plotControlsY+30},size={50.00,19.00},proc=TRACE_PARAMS,win=GraphControl,disable=showMarkerArea
 		PopupMenu TRACE_MARKER,mode=9,value= #"\"*MARKERPOP*\"",win=GraphControl,disable=showMarkerArea
+		PopupMenu TRACEMAIN_TOMODE,pos={300.00,plotControlsY+30},size={51.00,19.00},proc=TRACE_PARAMS,win=GraphControl,disable=showMarkerArea
+		PopupMenu TRACEMAIN_TOMODE,mode=1,popvalue="None",value= #"\"None;Draw to next;Add to next;Stack on next\"",win=GraphControl,disable=showMarkerArea
+
 		CheckBox TRACE_MARKEROPAQUE,pos={169.00,plotControlsY+30+2},size={57.00,15.00},value= 0,proc=TRACE_CHECK,title="Opaque",win=GraphControl,disable=showMarkerArea
 		CheckBox TRACE_MARKERSTROKE,pos={7,plotControlsY+55+2},size={48.00,15.00},value= 0,proc=TRACE_CHECK,title="Stroke",win=GraphControl,disable=showMarkerArea
 		SetVariable TRACE_MARKERTHICK,pos={60,plotControlsY+55},size={85.00,18.00},disable=1,proc=TRACE_VAR,title="Thick:",win=GraphControl,disable=showMarkerArea
@@ -1030,6 +1040,26 @@ Function GraphControlDuplicateDF(ctrlName) : ButtonControl
 		DoIgorMenu "Edit","Duplicate"
 	endif
 	ReplaceWave allinCDF
+	//---set the axes labels
+	variable i
+	if(strlen(WorkingPlotName())>0)
+		if(wintype(WorkingPlotName())==1)
+			for(i=0;i<itemsinlist(axislist(WorkingPlotName()));i++)
+				string AxName=stringfromlist(i,axislist(WorkingPlotName()))
+				string AxTicks=stringbykey("userticks(x)",axisinfo(WorkingPlotName(),AxName),"=")
+				if(strlen(AxTicks)>1)	//---user defined waves
+					AxTicks=replacestring("}",replacestring("{",replacestring(":",AxTicks,""),""),"")
+					string AxisWave=stringfromlist(0,AxTicks,",")
+					string AxisWaveTxT=stringfromlist(1,AxTicks,",")
+					if((strlen(AxisWave)>0)&&(strlen(AxisWaveTxT)>0))
+						if((waveexists($AxisWave))&&(waveexists($AxisWaveTxT)))
+							ModifyGraph/w=$WorkingPlotName() userticks($AxName)={$AxisWave,$AxisWaveTxT}
+						endif
+					endif
+				endif
+			endfor
+		endif
+	endif
 End
 
 Function GraphControlEnhance(ctrlName) : ButtonControl
@@ -1168,89 +1198,90 @@ function UpdatePlotParams()
 	dowindow GraphControl
 	if(v_flag)
 		if(strlen(WorkingPlotName())>0)
-			getwindow $WorkingPlotName() gsize
-			variable left=v_left,right=v_right,top=v_top,bottom=v_bottom
-			getwindow $WorkingPlotName() psize
-			left+=v_left;right-=v_right;top+=v_top;bottom-=v_bottom
-			setvariable PLOT_MARGIN_LEFT value=_NUM:round(left),win=GraphControl
-			setvariable PLOT_MARGIN_RIGHT value=_NUM:round(right),win=GraphControl
-			setvariable PLOT_MARGIN_TOP value=_NUM:round(top),win=GraphControl
-			setvariable PLOT_MARGIN_BOTTOM value=_NUM:round(bottom),win=GraphControl
-			setvariable PLOT_SIZEW value=_NUM:round(v_right-v_left),win=GraphControl
-			setvariable PLOT_SIZEH value=_NUM:round(v_bottom-v_top),win=GraphControl
-			SetVariable PLOT_NAME value=_STR:WorkingPlotName(),win=GraphControl
-			string recreation= winrecreation(WorkingPlotName(),0)
-			CheckBox PLOT_SWAPXY value=stringmatch(recreation,"*swapXY=1*"), win=GraphControl
-			if(strlen(stringbykey("expand",recreation,"=",",")))
-				SetVariable PLOT_EXPAND value=_NUM:abs(numberbykey("expand",recreation,"=",",")),win=GraphControl
-			else
-				SetVariable PLOT_EXPAND value=_NUM:1,win=GraphControl
-			endif
-	
-			variable axistype
-			string axistST="left"
-			for(axistype=0;axistype<=1;axistype++)
-				if(axistype==1)
-					axistST="bottom"
-				endif	
-				ComputePerUnit("PLOT_PERUNIT_AXIS_"+axistST)
-				controlinfo/w=GraphControl $"PLOT_AXIS_"+axistST
-				getaxis/w=$WorkingPlotName()/q $S_value
-				labelname=S_value
-//print labelname,"ok"
-				if((strlen(labelname)>0)&&(V_disable==0))
-					updatelabel+=((stringmatch(s_value,AxisLabel(WorkingPlotName(),labelname))==0))
-					execute "popupmenu PLOT_AXIS_COLOR_"+axistST +" popcolor="+stringbykey("axrgb(x)",axisinfo(WorkingPlotName(),labelname),"=")+",win=GraphControl"
-					SetVariable $"PLOT_"+axistST+"_MIN" value=_NUM:V_min,size={round(strlen(num2str(v_min))*6+30),18},win=GraphControl
-					SetVariable $"PLOT_"+axistST+"_MAX" value=_NUM:V_max,size={round(strlen(num2str(v_max))*6+30),18},win=GraphControl
-					checkbox $"PLOT_"+axistST+"_MODE_LINEAR" value=(numberbykey("log(x)",axisinfo(WorkingPlotName(),labelname),"=")==0),win=GraphControl
-					checkbox $"PLOT_"+axistST+"_MODE_LOG" value=(numberbykey("log(x)",axisinfo(WorkingPlotName(),labelname),"=")==1),win=GraphControl
-					checkbox $"PLOT_"+axistST+"_MODE_LOG2" value=(numberbykey("log(x)",axisinfo(WorkingPlotName(),labelname),"=")==2),win=GraphControl
-					SetVariable $"PLOT_"+axistST+"_LABEL" value=_str:AxisLabel(WorkingPlotName(),labelname),win=GraphControl
-					//---ticks
-					tickstr=stringbykey("manTick(x)",axisinfo(WorkingPlotName(),s_value),"=")
-					SetVariable $"PLOT_"+axistST+"_TICKS",disable=1,win=GraphControl,value=_num:numberbykey("nticks(x)",axisinfo(WorkingPlotName(),labelname),"=")
-					SetVariable $"PLOT_"+axistST+"_TICKSINC",disable=1,win=GraphControl,value=_num:str2num(stringfromlist(1,tickstr,","))
-					SetVariable $"PLOT_"+axistST+"_TICKSSTART",disable=1,win=GraphControl,value=_num:str2num(replacestring("{",stringfromlist(0,tickstr,","),""))
-					SetVariable $"PLOT_"+axistST+"_TICKSMINOR",disable=1,win=GraphControl,value=_num:str2num(replacestring("manMinor(x)={",stringfromlist(4,tickstr,","),""))
-					//---distance
-					string distST= removeending(replacestring("{",stringbykey("freepos(x)",axisinfo(WorkingPlotName(),labelname),"=")	,""))
-					if(strlen(distST)==0)
-						distST="0"
-					endif
-			//print distST
-					SetVariable $"PLOT_"+axistST+"_DISTANCE",win=GraphControl,value=_num:str2num(stringfromlist(0,distST))//,disable=(strlen(distST)==0)
-					
-					//---axis enabled
-					SetVariable $"PLOT_"+axistST+"_DRAWMIN",win=GraphControl,value=_num:str2num(stringfromlist(0,removeending(replacestring("{",stringbykey("axisenab(x)",axisinfo(WorkingPlotName(),labelname),"="),"")),","))*100
-					SetVariable $"PLOT_"+axistST+"_DRAWMAX",win=GraphControl,value=_num:str2num(stringfromlist(1,removeending(replacestring("{",stringbykey("axisenab(x)",axisinfo(WorkingPlotName(),labelname),"="),"")),","))*100
-					//---category axis		
-					if (numberbykey("ISCAT",AxisInfo(WorkingPlotName(), labelname),":"))	//---category
-						string catwave=stringbykey("HOOK",AxisInfo(WorkingPlotName(), labelname),":")+stringbykey("CATWAVE",AxisInfo(WorkingPlotName(), labelname),":")
-						getwindow graphcontrol wsizeDC
-						SetVariable $"PLOT_"+axistST+"_TICKS",size={(v_right-v_left)-95,15},value=_str:catwave,win=GraphControl
-					else
-						SetVariable $"PLOT_"+axistST+"_TICKS",size={80,15},value=_num:numberbykey("nticks(x)",axisinfo(WorkingPlotName(),labelname),"="),win=GraphControl
-					endif
-					controlinfo/w=GraphControl GC_AXES
-					if(stringmatch(S_UserData,"inactive"))		
-						if(strlen(stringbykey("manTick(x)",axisinfo(WorkingPlotName(),labelname),"="))==1)
-							button $"PLOT_"+axistST+"_AUTO_TICKS",userdata="manual",title="Auto ticks",win=GraphControl	
-							SetVariable $"PLOT_"+axistST+"_TICKS",disable=0,win=GraphControl
-						else
-							button $"PLOT_"+axistST+"_AUTO_TICKS",userdata="auto",title="Manual ticks",win=GraphControl
-							SetVariable $"PLOT_"+axistST+"_TICKSSTART",disable=0,win=GraphControl	
-							SetVariable $"PLOT_"+axistST+"_TICKSINC",disable=0,win=GraphControl
-							SetVariable $"PLOT_"+axistST+"_TICKSMINOR",disable=0,win=GraphControl
-						endif
-					endif			
-					CheckBox $"TRANS_HIDE_"+axistST ,win=GraphControl,value=((numberbykey("nticks(x)",axisinfo(WorkingPlotName(),labelname),"=")+numberbykey("axThick(x)",axisinfo(WorkingPlotName(),labelname),"="))==0)
-				else	//---no axis
-					modifycontrollist ControlNameList("GraphControl", ";", "PLOT_LEFT*") disable=1,win=GraphControl 
-					modifycontrollist ControlNameList("GraphControl", ";", "PLOT_BOTTOM*") disable=1,win=GraphControl 
+			if(wintype(WorkingPlotName())==1)
+				getwindow $WorkingPlotName() gsize
+				variable left=v_left,right=v_right,top=v_top,bottom=v_bottom
+				getwindow $WorkingPlotName() psize
+				left+=v_left;right-=v_right;top+=v_top;bottom-=v_bottom
+				setvariable PLOT_MARGIN_LEFT value=_NUM:round(left),win=GraphControl
+				setvariable PLOT_MARGIN_RIGHT value=_NUM:round(right),win=GraphControl
+				setvariable PLOT_MARGIN_TOP value=_NUM:round(top),win=GraphControl
+				setvariable PLOT_MARGIN_BOTTOM value=_NUM:round(bottom),win=GraphControl
+				setvariable PLOT_SIZEW value=_NUM:round(v_right-v_left),win=GraphControl
+				setvariable PLOT_SIZEH value=_NUM:round(v_bottom-v_top),win=GraphControl
+				SetVariable PLOT_NAME value=_STR:WorkingPlotName(),win=GraphControl
+				string recreation= winrecreation(WorkingPlotName(),0)
+				CheckBox PLOT_SWAPXY value=stringmatch(recreation,"*swapXY=1*"), win=GraphControl
+				if(strlen(stringbykey("expand",recreation,"=",",")))
+					SetVariable PLOT_EXPAND value=_NUM:abs(numberbykey("expand",recreation,"=",",")),win=GraphControl
+				else
+					SetVariable PLOT_EXPAND value=_NUM:1,win=GraphControl
 				endif
-			endfor
-			
+		
+				variable axistype
+				string axistST="left"
+				for(axistype=0;axistype<=1;axistype++)
+					if(axistype==1)
+						axistST="bottom"
+					endif	
+					ComputePerUnit("PLOT_PERUNIT_AXIS_"+axistST)
+					controlinfo/w=GraphControl $"PLOT_AXIS_"+axistST
+					getaxis/w=$WorkingPlotName()/q $S_value
+					labelname=S_value
+	//print labelname,"ok"
+					if((strlen(labelname)>0)&&(V_disable==0))
+						updatelabel+=((stringmatch(s_value,AxisLabel(WorkingPlotName(),labelname))==0))
+						execute "popupmenu PLOT_AXIS_COLOR_"+axistST +" popcolor="+stringbykey("axrgb(x)",axisinfo(WorkingPlotName(),labelname),"=")+",win=GraphControl"
+						SetVariable $"PLOT_"+axistST+"_MIN" value=_NUM:V_min,size={round(strlen(num2str(v_min))*6+30),18},win=GraphControl
+						SetVariable $"PLOT_"+axistST+"_MAX" value=_NUM:V_max,size={round(strlen(num2str(v_max))*6+30),18},win=GraphControl
+						checkbox $"PLOT_"+axistST+"_MODE_LINEAR" value=(numberbykey("log(x)",axisinfo(WorkingPlotName(),labelname),"=")==0),win=GraphControl
+						checkbox $"PLOT_"+axistST+"_MODE_LOG" value=(numberbykey("log(x)",axisinfo(WorkingPlotName(),labelname),"=")==1),win=GraphControl
+						checkbox $"PLOT_"+axistST+"_MODE_LOG2" value=(numberbykey("log(x)",axisinfo(WorkingPlotName(),labelname),"=")==2),win=GraphControl
+						SetVariable $"PLOT_"+axistST+"_LABEL" value=_str:AxisLabel(WorkingPlotName(),labelname),win=GraphControl
+						//---ticks
+						tickstr=stringbykey("manTick(x)",axisinfo(WorkingPlotName(),s_value),"=")
+						SetVariable $"PLOT_"+axistST+"_TICKS",disable=1,win=GraphControl,value=_num:numberbykey("nticks(x)",axisinfo(WorkingPlotName(),labelname),"=")
+						SetVariable $"PLOT_"+axistST+"_TICKSINC",disable=1,win=GraphControl,value=_num:str2num(stringfromlist(1,tickstr,","))
+						SetVariable $"PLOT_"+axistST+"_TICKSSTART",disable=1,win=GraphControl,value=_num:str2num(replacestring("{",stringfromlist(0,tickstr,","),""))
+						SetVariable $"PLOT_"+axistST+"_TICKSMINOR",disable=1,win=GraphControl,value=_num:str2num(replacestring("manMinor(x)={",stringfromlist(4,tickstr,","),""))
+						//---distance
+						string distST= removeending(replacestring("{",stringbykey("freepos(x)",axisinfo(WorkingPlotName(),labelname),"=")	,""))
+						if(strlen(distST)==0)
+							distST="0"
+						endif
+				//print distST
+						SetVariable $"PLOT_"+axistST+"_DISTANCE",win=GraphControl,value=_num:str2num(stringfromlist(0,distST))//,disable=(strlen(distST)==0)
+						
+						//---axis enabled
+						SetVariable $"PLOT_"+axistST+"_DRAWMIN",win=GraphControl,value=_num:str2num(stringfromlist(0,removeending(replacestring("{",stringbykey("axisenab(x)",axisinfo(WorkingPlotName(),labelname),"="),"")),","))*100
+						SetVariable $"PLOT_"+axistST+"_DRAWMAX",win=GraphControl,value=_num:str2num(stringfromlist(1,removeending(replacestring("{",stringbykey("axisenab(x)",axisinfo(WorkingPlotName(),labelname),"="),"")),","))*100
+						//---category axis		
+						if (numberbykey("ISCAT",AxisInfo(WorkingPlotName(), labelname),":"))	//---category
+							string catwave=stringbykey("HOOK",AxisInfo(WorkingPlotName(), labelname),":")+stringbykey("CATWAVE",AxisInfo(WorkingPlotName(), labelname),":")
+							getwindow graphcontrol wsizeDC
+							SetVariable $"PLOT_"+axistST+"_TICKS",size={(v_right-v_left)-95,15},value=_str:catwave,win=GraphControl
+						else
+							SetVariable $"PLOT_"+axistST+"_TICKS",size={80,15},value=_num:numberbykey("nticks(x)",axisinfo(WorkingPlotName(),labelname),"="),win=GraphControl
+						endif
+						controlinfo/w=GraphControl GC_AXES
+						if(stringmatch(S_UserData,"inactive"))		
+							if(strlen(stringbykey("manTick(x)",axisinfo(WorkingPlotName(),labelname),"="))==1)
+								button $"PLOT_"+axistST+"_AUTO_TICKS",userdata="manual",title="Auto ticks",win=GraphControl	
+								SetVariable $"PLOT_"+axistST+"_TICKS",disable=0,win=GraphControl
+							else
+								button $"PLOT_"+axistST+"_AUTO_TICKS",userdata="auto",title="Manual ticks",win=GraphControl
+								SetVariable $"PLOT_"+axistST+"_TICKSSTART",disable=0,win=GraphControl	
+								SetVariable $"PLOT_"+axistST+"_TICKSINC",disable=0,win=GraphControl
+								SetVariable $"PLOT_"+axistST+"_TICKSMINOR",disable=0,win=GraphControl
+							endif
+						endif			
+						CheckBox $"TRANS_HIDE_"+axistST ,win=GraphControl,value=((numberbykey("nticks(x)",axisinfo(WorkingPlotName(),labelname),"=")+numberbykey("axThick(x)",axisinfo(WorkingPlotName(),labelname),"="))==0)
+					else	//---no axis
+						modifycontrollist ControlNameList("GraphControl", ";", "PLOT_LEFT*") disable=1,win=GraphControl 
+						modifycontrollist ControlNameList("GraphControl", ";", "PLOT_BOTTOM*") disable=1,win=GraphControl 
+					endif
+				endfor
+			endif	
 		else //---no plots
 			modifycontrollist ControlNameList("GraphControl", ";", "PLOT_LEFT*") disable=1,win=GraphControl 
 			modifycontrollist ControlNameList("GraphControl", ";", "PLOT_BOTTOM*") disable=1,win=GraphControl 
@@ -1304,7 +1335,7 @@ Function PLOTINFOPASTE(ctrlName) : ButtonControl
 			string info=axesval[i][1]
 			string recreation=replacestring("RECREATION:",info[strsearch(info,"RECREATION",0),strlen(info)-1],"")
 			for (items=0;items<itemsinlist(recreation);items+=1)
-				execute/q "ModifyGraph /w="+WorkingPlotName()+ReplaceString("(x)",stringfromlist(items,recreation),"("+axesval[i][0]+")",1)	
+				execute/q "ModifyGraph /w="+WorkingPlotName()+" "+ReplaceString("(x)",stringfromlist(items,recreation),"("+axesval[i][0]+")",1)	
 			endfor	
 			execute /p "label /w="+WorkingPlotName()+" " + axesval[i][0]+" \""+ replacestring("\\", axesval[i][2],"\\")+"\""
 		endif
@@ -1410,22 +1441,51 @@ function/s getaxistype(left0bottom1)
 	string result=""
 	string DF=getdatafolder(1)
 	setdatafolder root:GraphControl:	
-//print WorkingPlotName()
 	if(strlen(WorkingPlotName())>0)
-		for(i=0;i<itemsinlist(axislist(WorkingPlotName()));i+=1)
-			if((stringmatch( stringbykey("AXTYPE",AxisInfo(WorkingPlotName(), stringfromlist(i,axislist(WorkingPlotName()))) ,":"),"*left*")) ||(stringmatch( stringbykey("AXTYPE",AxisInfo(WorkingPlotName(), stringfromlist(i,axislist(WorkingPlotName()))) ,":"),"*right*")))
-				if(left0bottom1==0)
-					result+=stringfromlist(i,axislist(WorkingPlotName()))+";"
+		if(wintype(WorkingPlotName())==1)
+			for(i=0;i<itemsinlist(axislist(WorkingPlotName()));i+=1)
+				if((stringmatch( stringbykey("AXTYPE",AxisInfo(WorkingPlotName(), stringfromlist(i,axislist(WorkingPlotName()))) ,":"),"*left*")) ||(stringmatch( stringbykey("AXTYPE",AxisInfo(WorkingPlotName(), stringfromlist(i,axislist(WorkingPlotName()))) ,":"),"*right*")))
+					if(left0bottom1==0)
+						result+=stringfromlist(i,axislist(WorkingPlotName()))+";"
+					endif
 				endif
-			endif
-			if((stringmatch( stringbykey("AXTYPE",AxisInfo(WorkingPlotName(), stringfromlist(i,axislist(WorkingPlotName()))) ,":"),"*bottom*")) ||(stringmatch( stringbykey("AXTYPE",AxisInfo(WorkingPlotName(), stringfromlist(i,axislist(WorkingPlotName()))) ,":"),"*top*")))
-				if(left0bottom1==1)
-					result+=stringfromlist(i,axislist(WorkingPlotName()))+";"
+				if((stringmatch( stringbykey("AXTYPE",AxisInfo(WorkingPlotName(), stringfromlist(i,axislist(WorkingPlotName()))) ,":"),"*bottom*")) ||(stringmatch( stringbykey("AXTYPE",AxisInfo(WorkingPlotName(), stringfromlist(i,axislist(WorkingPlotName()))) ,":"),"*top*")))
+					if(left0bottom1==1)
+						result+=stringfromlist(i,axislist(WorkingPlotName()))+";"
+					endif
 				endif
+			endfor
+			//---make sure that there is next axis to increment
+			i=0
+			
+			if(left0bottom1==0)
+				string axis0="left",axis1="right"
+			else
+				axis0="top",axis1="bottom"
 			endif
-		endfor
+			string axiscompare=axis0
+			do
+				if(i>0)
+					axiscompare=axis0+num2str(i)
+				endif
+				i++
+			while(whichlistitem(axiscompare,result)>=0)
+			result+=axiscompare+";"
+			axiscompare=axis1
+			i=0
+			do
+				if(i>0)
+					axiscompare=axis1+num2str(i)
+				endif
+				i++
+			while(whichlistitem(axiscompare,result)>=0)
+			result+=axiscompare+";"			
+		endif
 	endif
-	setdatafolder $DF
+	
+	if(datafolderExists(DF))
+		setdatafolder $DF
+	endif
 	return result
 end
 
@@ -1751,14 +1811,10 @@ end
 function/s FindErrorWavesFolder()
 	string foundwaves="_none_"
 	if(gettracenumber(-1)>=0)
-	print getdatafolder(1)
-		//string DF=getdatafolder(1)
-		//setdatafolder root:graphcontrol:			
-		variable tracepnts=numpnts(WaveRefIndexed(WorkingPlotName(), gettracenumber(-1),1))
-		//setdatafolder DF
+		variable tracepnts=dimsize(WaveRefIndexed(WorkingPlotName(), gettracenumber(-1),1),0)
 		variable w
 		for(w=0;w<countobjects(getdatafolder(1),1);w++)
-			if(numpnts($GetIndexedObjName(getdatafolder(1),1,w))==tracepnts)
+			if(dimsize($GetIndexedObjName(getdatafolder(1),1,w),0)==tracepnts)
 				foundwaves+=";"+GetIndexedObjName(getdatafolder(1),1,w)
 			endif
 		endfor
@@ -2025,7 +2081,7 @@ Function UpdateImageParameters([setDF])
 			setdataFolder $stringbykey("zwavedf",imageinfo(WorkingPlotName(),imagename,0),":")
 			PopupMenu PLOT_FOLDER_PARENT_LEFT value=getdatafolder(1),win=GraphControl
 			UpdateDirFolder(getdatafolder(1),"LEFT")
-
+			UpdateFolderColors()
 		endif
 		if(waveexists(ImageNameToWaveRef(WorkingPlotName(),imagename)))
 			variable Numplane=numberbykey("plane",imageinfo(WorkingPlotName(),imagename,0),"=") 
@@ -2033,7 +2089,14 @@ Function UpdateImageParameters([setDF])
 			string colortable=stringbykey("RECREATION",imageinfo(WorkingPlotName(),imagename,0),":") 
 			if(stringmatch(colortable,"*ctab*"))//---color table
 				colortable=removeending(replacestring("ctab= {",colortable,""))
-				PopupMenu PLOT_IMAGE_COLOR mode=whichlistitem( stringfromlist(2,colortable,","),CTabList())+1,win=GraphControl
+				if(whichlistitem( stringfromlist(2,colortable,","),CTabList())>0)
+				
+					PopupMenu PLOT_IMAGE_COLOR mode=whichlistitem( stringfromlist(2,colortable,","),CTabList())+1,win=GraphControl
+				else
+					
+				endif
+				PopupMenu PLOT_IMAGE_COLOR userdata=stringfromlist(2,colortable,","),win=GraphControl
+		
 				if(strlen(stringbykey("minRGB",imageinfo(WorkingPlotName(),imagename,0),"="))>1)
 					execute "popupmenu PLOT_IMAGE_COLOR_MINRGB popcolor="+stringbykey("minRGB",imageinfo(WorkingPlotName(),imagename,0),"=")+",win=GraphControl"
 				endif
@@ -2092,12 +2155,82 @@ Function UpdateImageParameters([setDF])
 end
 
 //---image selection
-Function IMAGELIST(ctrlName,row,col,event) : ListBoxControl
-	String ctrlName
-	Variable row
-	Variable col
-	Variable event
-	if(event==2)//---mouse up
+Function IMAGELIST(LB_Struct) : ListBoxControl
+	STRUCT WMListboxAction &LB_Struct
+	string ctrlName=LB_Struct.ctrlName
+	Variable row=LB_Struct.row
+	Variable col=LB_Struct.col
+	Variable event=LB_Struct.eventcode	
+	if(event==1)//---mouse up
+		string DFsave=getdatafolder(1)
+		setdatafolder root:GraphControl:
+		wave/t ImageListText
+
+		if(LB_Struct.eventMod==16)//---right mouse click
+			string MenuItems=""
+			MenuItems+= "Remove;"
+			if((col==2))
+				MenuItems+= "Set DF;"
+			endif
+			if((col==3))	//---y axis
+				MenuItems=getaxistype(0)
+			endif
+			if((col==4))	//---x axis
+				MenuItems=getaxistype(1)
+			endif
+
+			PopupContextualMenu MenuItems
+			if(stringmatch(S_selection,"Remove"))
+				removeimage/w=$WorkingPlotName() $ImageListText[row][0]
+			endif
+			if(stringmatch(S_selection,"Set DF"))
+				execute /p/q "setdatafolder "+ImageListText[row][col]
+			endif
+			if((col==3)&&(strlen(S_selection)>0))	//---y axis
+				IMAGECOPY("")
+				string info=imageinfo(WorkingPlotName(),ImageListText[row][0],0)
+				string yaxis="",xaxis=stringbykey("XAXIS",info,":")
+				if(stringmatch(xaxis,"bottom*"))
+					xaxis=" /b="+xaxis
+				else
+					xaxis=" /t="+xaxis
+				endif
+				if(stringmatch(S_selection,"left*"))
+					yaxis=" /l="+S_selection
+				else
+					yaxis=" /r="+S_selection
+				endif
+				removeimage/w=$WorkingPlotName() $ImageListText[row][0]
+				execute "appendimage/w="+WorkingPlotName()+xaxis+yaxis+" " +(stringbykey("ZWAVEDF",info,":")+stringbykey("ZWAVE",info,":"))
+				IMAGEINFOPASTE("")	
+			endif
+			if((col==4)&&(strlen(S_selection)>0))	//---x axis
+				IMAGECOPY("")
+				info=imageinfo(WorkingPlotName(),ImageListText[row][0],0)
+				xaxis=""
+				yaxis=stringbykey("YAXIS",info,":")
+				if(stringmatch(S_selection,"bottom*"))
+					xaxis=" /b="+S_selection
+				else
+					xaxis=" /t="+S_selection
+				endif
+				if(stringmatch(yaxis,"left*"))
+					yaxis=" /l="+yaxis
+				else
+					yaxis=" /r="+yaxis
+				endif
+
+				removeimage/w=$WorkingPlotName() $ImageListText[row][0]
+				execute "appendimage/w="+WorkingPlotName()+xaxis+yaxis+" " +(stringbykey("ZWAVEDF",info,":")+stringbykey("ZWAVE",info,":"))
+				IMAGEINFOPASTE("")
+			endif			
+		endif
+		setdatafolder root:graphcontrol:		
+		nvar MustUpdate	
+		MustUpdate=1
+		updatetracelist(1)
+		setdatafolder $DFsave
+	
 		UpdateImageParameters(setDF=1)
 	endif
 	
@@ -2112,8 +2245,11 @@ Function IMAGECOLORTABLE(ctrlName,popNum,popStr) : PopupMenuControl
 	if (inum>-1)//---selected image
 		string imagename=stringfromlist(inum,ImageNameList(WorkingPlotName(), ";" ))
 		if(strlen(imagename)>0)
-			controlinfo /w=GraphControl PLOT_IMAGE_COLOR
-			variable color=v_value
+			string colortable=getuserdata("GraphControl","PLOT_IMAGE_COLOR","")
+			if(stringmatch(ctrlName,"PLOT_IMAGE_COLOR"))
+				controlinfo /w=GraphControl PLOT_IMAGE_COLOR
+				colortable=stringfromlist(v_value-1,CTabList())
+			endif
 			controlinfo /w=GraphControl PLOT_IMAGE_COLOR_REV
 			variable rev=v_value
 			controlinfo /w=GraphControl PLOT_IMAGE_COLOR_LOG
@@ -2147,7 +2283,8 @@ Function IMAGECOLORTABLE(ctrlName,popNum,popStr) : PopupMenuControl
 			PopupMenu PLOT_IMAGE_COLOR_MINRGB disable=(v_value),win=GraphControl
 			controlinfo /w=GraphControl PLOT_IMAGE_COLOR_MAX_AUTO
 			PopupMenu PLOT_IMAGE_COLOR_MAXRGB disable=(v_value),win=GraphControl
-			string printST= "ModifyImage/w="+WorkingPlotName()+" " +imagename+" ctab= {"+minst+","+maxst+","+stringfromlist(color-1,CTabList())+","+num2str(rev)+"}"+minRGB+maxRGB+",log="+num2str(collog)	
+			string printST= "ModifyImage/w="+WorkingPlotName()+" " +imagename+" ctab= {"+minst+","+maxst+","+colortable+","+num2str(rev)+"}"+minRGB+maxRGB+",log="+num2str(collog)	
+//			string printST= "ModifyImage/w="+WorkingPlotName()+" " +imagename+" ctab= {"+minst+","+maxst+","+stringfromlist(color-1,CTabList())+","+num2str(rev)+"}"+minRGB+maxRGB+",log="+num2str(collog)	
 			controlinfo/w=GraphControl PLOT_PRINT
 			if(v_value)
 				execute/p printST
@@ -2395,6 +2532,8 @@ Function UpdateFolderColors([clicked])
 				SelectTrace=-1
 			endif	
 			for(folders=0;folders<=1;folders++)	//---left and right folder windows
+				setdatafolder root:graphcontrol:	
+				make/o/n=2/t leftright={"left","right"}
 				duplicate/o $leftright[folders]+"FolderListSelect",FolderListSelect
 				duplicate/o/t $leftright[folders]+"FolderListText",FolderListText
 				make/o/n=(dimsize(FolderListSelect,0)*2+9,3) ListColor=65535								//---white
@@ -2421,9 +2560,14 @@ Function UpdateFolderColors([clicked])
 							FolderListSelect[DSnum][][1,2]=(dimsize(ListColor,0)-9)*(r==2)
 						endif
 					else	//---wave
+					
 						FolderListSelect[DSnum][][2]=(dimsize(ListColor,0)-(1+q))	//---background gray
 						for (tnum=0;tnum<dimsize(listtext,0);tnum++)		//---over all traces - colors based on the plot
-							string tracename=stringfromList(tnum,TraceNameList(WorkingPlotName(), ";", 1 ))						
+							string tracename=stringfromList(tnum,TraceNameList(WorkingPlotName(), ";", 1 ))				
+							if(waveexists(FolderListText)==0)
+								setdatafolder DF
+								return -1
+							endif		
 							if( (stringmatch(listtext[tnum][4+folders],winDF))&&(stringmatch(listtext[tnum][2+folders],FolderListText[DSnum][1])))//---correct directory
 								string tracecolor=stringbykey("rgb(x)",traceinfo(WorkingPlotName(),tracename,0),"=")
 								ListColor[DSnum][0,2]=str2num(stringfromlist(q,replacestring("(",tracecolor,""),","))
@@ -2459,8 +2603,12 @@ Function UpdateFolderColors([clicked])
 					endif	
 				endfor
 				setdatafolder root:graphcontrol:	
-				duplicate/o ListColor,$leftright[folders]+"FolderListColor"
-				duplicate/o FolderListSelect,$leftright[folders]+"FolderListSelect"
+				if(waveexists(ListColor))
+					duplicate/o ListColor,$leftright[folders]+"FolderListColor"
+				endif
+				if(waveexists(FolderListSelect))
+					duplicate/o FolderListSelect,$leftright[folders]+"FolderListSelect"
+				endif
 			endfor
 		endif
 		killwaves/z leftright,ListColor,FolderListSelect,FolderListText
@@ -2530,12 +2678,16 @@ Function DFSELECTListBoxProc(LB_Struct) : ListBoxControl
 	endif
 	string CurrentDF=getuserdata("graphcontrol","PLOT_FOLDER_PARENT_"+leftright[folders],"")
 	string NewDF=getuserdata("graphcontrol","PLOT_FOLDER_PARENT_"+leftright[1-folders],"")
-	setdatafolder $CurrentDF
+	if(datafolderexists(CurrentDF))
+		setdatafolder $CurrentDF
+	else
+		CurrentDF="root:"
+	endif
 
 	if(row>=dimsize(DFselect,0))
 		execute/q/p "UpdateDirFolder(\""+CurrentDF+"\",\""+leftright[folders]+"\")"
 		execute /p/q "UpdateDirFolder(\""+NewDF+"\",\""+leftright[1-folders]+"\")"
-		if((LB_Struct.eventmod==17)&&(event==1))
+		if((LB_Struct.eventmod==16)&&(event==1))
 			PopupContextualMenu "New Folder;Match Folders"
 			if(stringmatch(S_selection,"New Folder"))
 				newdatafolder/o New
@@ -2551,7 +2703,7 @@ Function DFSELECTListBoxProc(LB_Struct) : ListBoxControl
 
 	else
 		
-		if((col==1)&& (LB_Struct.eventmod==17)&&(strlen(leftright[folders])>0)&&(event==1)&&(row>0))//---menu
+		if((col==1)&& (LB_Struct.eventmod==16)&&(strlen(leftright[folders])>0)&&(event==1)&&(row>0))//---menu
 				//---find selected waves/folders				
 			if(waveexists(DFSelectSave))
 				if(dimsize(DFSelectSave,0)==(dimsize(DFname,0)))
@@ -2603,14 +2755,24 @@ Function DFSELECTListBoxProc(LB_Struct) : ListBoxControl
 				endif				
 			endif
 			if(stringmatch(DFname[row][0],"M"))//---image
-				MenuItems+="New Image;"
+				MenuItems+="New Image;Add Image;"
+				if((dimsize($DFname[row][1],1)==3)||(dimsize($DFname[row][1],1)==4))
+					MenuItems+="Set Image z;"
+				endif
+				MenuItems+="Replace Image;"
 			endif
+
 			if(stringmatch(CurrentDF,NewDF)==0)//---waves and DF can be copied 
 				MenuItems+="Move;"
 			endif
-			MenuItems+="Copy;Delete;"
+			MenuItems+="Copy;Delete;Refresh"
 			//---bring the menu
 			PopupContextualMenu MenuItems
+			//---refresh the panel
+			if(stringmatch(S_selection,"Refresh"))
+				execute /p/q "UpdateDirFolder(\""+CurrentDF+"\",\""+leftright[folders]+"\")"
+				execute /p/q "UpdateDirFolder(\""+NewDF+"\",\""+leftright[1-folders]+"\")"
+			endif
 			if(stringmatch(S_selection,"New Folder"))
 				newdatafolder/o New
 				execute/q/p "UpdateDirFolder(\""+getdatafolder(1)+"\",\""+leftright[folders]+"\")"
@@ -2678,14 +2840,37 @@ Function DFSELECTListBoxProc(LB_Struct) : ListBoxControl
 			endif 
 			if(stringmatch(S_selection,"Replace Y"))
 				ReplaceWave /w=$WorkingPlotName() trace=$ListText[gettracenumber(-1)][2], $DFname[row][1]
+				updatetracelist(0)
 			endif
 			if(stringmatch(S_selection,"Replace X"))
 				ReplaceWave /w=$WorkingPlotName() /X trace=$ListText[gettracenumber(-1)][2], $DFname[row][1]
+				updatetracelist(0)
 			endif
 			//---new image (for multi-dim waves only)
 			if(stringmatch(S_selection,"New Image"))
 				newimage/k=1 $DFname[row][1]
+				UpdateImageParameters()
 			endif
+			if(stringmatch(S_selection,"Add Image"))
+				appendimage /w=$WorkingPlotName() $DFname[row][1]
+				UpdateImageParameters()
+				updatetracelist(1)
+			endif
+			//---set image color or replace image
+			if((stringmatch(S_selection,"Set Image z"))||(stringmatch(S_selection,"Replace Image")))
+				controlinfo /w=GraphControl PLOT_IMAGE_LIST
+				variable inum=v_value
+				if(inum>=0)	
+					string imagename=stringfromlist(inum,ImageNameList(WorkingPlotName(), ";" ))
+					if(stringmatch(S_selection,"Set Image z"))
+						ModifyImage/w=$WorkingPlotName() $imagename ctab= {*,*,$DFname[row][1],0}
+					else	//---replace wave
+						ReplaceWave/w=$WorkingPlotName() image=$imagename, $DFname[row][1]
+					endif
+				endif
+			endif		
+
+				
 			//---add error bars 
 			if(stringmatch(S_selection,"Add * Error*"))
 				if(stringmatch(S_selection,"Add *Y Error*"))
@@ -2700,7 +2885,7 @@ Function DFSELECTListBoxProc(LB_Struct) : ListBoxControl
 					if(str2num(FoldersData[DSnum][0])==0)	//---wave
 						if(waveexists($FoldersData[DSnum][1]))
 							if(stringmatch(S_selection,"Copy"))
-								execute "duplicate/o "+FoldersData[DSnum][1]+","+NewDF+FoldersData[DSnum][1]+"_copy"
+								execute "duplicate/o "+FoldersData[DSnum][1]+","+NewDF+FoldersData[DSnum][1]//+"_copy"
 							else
 								execute "movewave "+FoldersData[DSnum][1]+","+NewDF+FoldersData[DSnum][1]
 							endif
@@ -2816,6 +3001,7 @@ End
 function updatetracecontrols()
 	string DF=getdatafolder(1)
 	setdatafolder root:graphcontrol:	
+	wave/t ImageListText
 	//wave plotADVANCEDx,plotADVANCEDxSAVE
 	string/g enablelist="",disablelist=""
 	string info="",tracename
@@ -2851,6 +3037,7 @@ function updatetracecontrols()
 			tracename=stringfromlist(gettracenumber(-1),TraceNameList(WorkingPlotName(), ";", 1 ))
 			info =traceinfo(WorkingPlotName(),tracename,0)	
 			popupmenu TRACEMAIN_MODE mode=numberbykey("mode(x)",info,"=")+1,win=GraphControl
+			popupmenu TRACEMAIN_TOMODE mode=numberbykey("tomode(x)",info,"=")+1,win=GraphControl
 			popupmenu TRACE_FILLTYPEplus mode=numberbykey("hbFill(x)",info,"=")+1,win=GraphControl
 			popupmenu TRACE_FILLTYPEneg mode=numberbykey("hBarNegFill(x)",info,"=")+2,win=GraphControl
 			popupmenu TRACEMAIN_LINE mode=numberbykey("lstyle(x)",info,"=")+1,win=GraphControl
@@ -3004,17 +3191,29 @@ function updatetracecontrols()
 			popupmenu PLOT_AXIS_BOTTOM mode=axisbottom+1,win=GraphControl
 			//updateplotparams()
 		else	//---no trace selected
-			controlinfo/w=graphcontrol PLOT_AXIS_LEFT
-			if(v_value>0)//there are axes
-				if(stringmatch(s_value,stringfromlist(0,getaxistype(0)))==0)
-					popupmenu PLOT_AXIS_LEFT mode=1,win= graphcontrol 	
+			//---check the images
+			controlinfo/w=graphcontrol PLOT_IMAGE_LIST
+			if((v_value>=-1)&&(v_value<dimsize(ImageListText,0)))
+				info=imageinfo(WorkingPlotName(),ImageListText[v_value][0],0)
+				//axisleft=stringbykey("YAXIS",info,":")
+				axisleft=whichlistitem(stringbykey("YAXIS",info,":"),getaxistype(0))
+				axisbottom=whichlistitem(stringbykey("XAXIS",info,":"),getaxistype(1))
+				popupmenu PLOT_AXIS_LEFT mode=axisleft+1,win=GraphControl
+				popupmenu PLOT_AXIS_BOTTOM mode=axisbottom+1,win=GraphControl
+			else
+			//print v_value
+				controlinfo/w=graphcontrol PLOT_AXIS_LEFT
+				if(v_value>0)//there are axes
+					if(stringmatch(s_value,stringfromlist(0,getaxistype(0)))==0)
+						popupmenu PLOT_AXIS_LEFT mode=1,win= graphcontrol 	
+					endif
+					controlinfo/w=graphcontrol PLOT_AXIS_BOTTOM
+					if(stringmatch(s_value,stringfromlist(0,getaxistype(1)))==0)
+						popupmenu PLOT_AXIS_BOTTOM mode=1,win= graphcontrol 
+					endif
+					popupmenu PLOT_AXIS_LEFT mode=1, win=GraphControl
+					popupmenu PLOT_AXIS_BOTTOM mode=1, win=GraphControl
 				endif
-				controlinfo/w=graphcontrol PLOT_AXIS_BOTTOM
-				if(stringmatch(s_value,stringfromlist(0,getaxistype(1)))==0)
-					popupmenu PLOT_AXIS_BOTTOM mode=1,win= graphcontrol 
-				endif
-				popupmenu PLOT_AXIS_LEFT mode=1, win=GraphControl
-				popupmenu PLOT_AXIS_BOTTOM mode=1, win=GraphControl
 			endif
 		endif
 		controlinfo/w=GraphControl GC_TRACES
@@ -3068,14 +3267,14 @@ function updatetracelist(event)
 			if((event==0)||(event==16))//activate or unhide
 				make/o/WAVE/n=(tracesnum) ywaveref,xwaveref
 			endif
-			Redimension/N=(tracesnum,8) listselect
+			Redimension/N=(tracesnum,9) listselect
 			Redimension/N=(tracesnum) ywaveref,xwaveref
 			if(numpnts(listselect)>0)
 			//	listselect=mod(listselect,2)
 			endif
 			//updateplotparams()
 			//---fill the information
-			Redimension /n=(tracesnum,8) listtext
+			Redimension /n=(tracesnum,9) listtext
 			Redimension/n=(imagesnum,5) ImageListText
 			variable tnum,inum
 			string st 
@@ -3140,11 +3339,12 @@ function updatetracelist(event)
 				//---/x axis
 				listtext[tnum][7]=stringbykey("XAXIS",info,":")
 				listselect[tnum][7]=6	
+				listtext[tnum][8]=num2str(dimsize(ywaveref[tnum],0))+"x"+num2str(dimsize(ywaveref[tnum],1))+"x"+num2str(dimsize(ywaveref[tnum],2))
 			endfor
 		else //---no top plot
-			make/o/n=(0,8) listselect=0
-			make/o/t/n=(0,8) listtext
-			make/o/t/n=(8) listtitle
+			make/o/n=(0,9) listselect=0
+			make/o/t/n=(0,9) listtext
+			make/o/t/n=(9) listtitle
 		endif
 	endif
 	setdatafolder DF	
@@ -3448,10 +3648,15 @@ function changetraceparams(ctrlName,Num,Str)
 	for (tnum=0;tnum<dimsize(listselect,0);tnum+=1)
 		if (listselect[tnum][0]>0)
 			string tracename=stringfromlist(tnum,TraceNameList(WorkingPlotName(), ";", 1 ))	
-			if (stringmatch(ctrlName,"*mode"))//mode style
+			if (stringmatch(ctrlName,"TRACEMAIN_MODE"))//mode style
 				printST= " mode(" +tracename+")="+num2str(Num-1)
 				execute/p/q "updatetracecontrols()"	
 			endif
+			if (stringmatch(ctrlName,"TRACEMAIN_TOMODE"))//mode style
+				printST= " tomode(" +tracename+")="+num2str(Num-1)
+//				execute/p/q "updatetracecontrols()"	
+			endif
+
 			if ((stringmatch(ctrlName,"TRACEMAIN_COL"))|| (stringmatch(ctrlName,"TRACEMAIN_COLTRANS")))//color
 				controlinfo/w=graphcontrol TRACEMAIN_COL
 				str=S_Value
@@ -3485,7 +3690,7 @@ function changetraceparams(ctrlName,Num,Str)
 			if (stringmatch(ctrlName,"*colfillneg"))//fill color 
 				printST=  " negRGB("+tracename+")="+Str
 				CheckBox TRACE_FILLCOLORneg value=1,win=GraphControl
-				printST+= "; usenegRGB(" +tracename+")=1"		
+				printST+= ";ModifyGraph/w="+WorkingPlotName()+" usenegRGB(" +tracename+")=1"		
 			endif													
 			if (stringmatch(ctrlName,"*line"))//linestyle
 				printST=  " lstyle(" +tracename+")="+num2str(Num-1)			
@@ -3528,11 +3733,21 @@ function changetraceparams(ctrlName,Num,Str)
 					 	printST=  "zColor(" +tracename+")=0"
 					else	//---z color present
 						found=1
-						controlinfo /w=GraphControl TRACE_ADVANCE_COLOR
-						variable color=v_value
-						controlinfo /w=GraphControl TRACE_ADVANCE_COLOR_REV
-						variable rev=v_value	
-						execST=stringfromlist(color-1,CTabList())+","+num2str(rev)
+						variable directRGB=0
+						if(waveexists($zwave))
+							if( (dimsize($zwave,1)==3)||(dimsize($zwave,1)==4))	//---direct RGB
+								directRGB=1
+							endif
+						endif
+						if(directRGB)
+							execST="directRGB,0"
+						else
+							controlinfo /w=GraphControl TRACE_ADVANCE_COLOR
+							variable color=v_value
+							controlinfo /w=GraphControl TRACE_ADVANCE_COLOR_REV
+							variable rev=v_value	
+							execST=stringfromlist(color-1,CTabList())+","+num2str(rev)
+						endif
 					endif	
 					ztype="zColor"
 				endif
@@ -3601,6 +3816,7 @@ function changetraceparams(ctrlName,Num,Str)
 		endif
 		setdatafolder DF	
 		if(strlen(printST)>0)
+			//printST=replacestring(";", printST,",")
 			controlinfo/w=GraphControl PLOT_PRINT
 			if(v_value)
 				execute/p "ModifyGraph/w="+WorkingPlotName()+" "+ printST
@@ -3627,11 +3843,13 @@ Function TRACELIST(LB_Struct) : ListBoxControl
 	wave/wave ywaveref,xwaveref
 	variable i,tnum,found
 	variable/g selectedrow
+	
 	if ((event==1)&&(row>=-1))//mouse down, used for reorder	,replace waves
+	//print event,row,LB_Struct.eventMod
 		if(row<0)//---header
 		elseif (row<=dimsize(listtext,0))	//---main body
 			selectedrow=-1
-			if(LB_Struct.eventMod==17)//---right mouse click,replace
+			if(LB_Struct.eventMod==16)//---right mouse click,replace
 				MustUpdate=1
 				if (row<dimsize(listtext,0))
 					if(stringmatch(listtitle[col],"Y axis"))
@@ -3709,10 +3927,16 @@ Function TRACELIST(LB_Struct) : ListBoxControl
 		if(row>=0)	
 			MustUpdate=1
 			if(stringmatch(listtitle[col],"Pos"))
-				if(row<dimsize(listselect,0)-1)
-					ReorderTraces /w=$WorkingPlotName() _front_, {$stringfromlist(row,TraceNameList(WorkingPlotName(), ";", 1 ))}
-				else
-					ReorderTraces /w=$WorkingPlotName() _back_,{$stringfromlist(row,TraceNameList(WorkingPlotName(), ";", 1 ))}
+				if(dimsize(listselect,0)>1)
+					if((row<dimsize(listselect,0)-1))
+						if((row==dimsize(listselect,0)-2))
+							ReorderTraces /w=$WorkingPlotName() _front_, {$stringfromlist(row,TraceNameList(WorkingPlotName(), ";", 1 ))}
+						else
+							ReorderTraces /w=$WorkingPlotName() $stringfromlist(row+2,TraceNameList(WorkingPlotName(), ";", 1 )), {$stringfromlist(row,TraceNameList(WorkingPlotName(), ";", 1 ))}
+						endif
+					else
+						ReorderTraces /w=$WorkingPlotName() _back_,{$stringfromlist(row,TraceNameList(WorkingPlotName(), ";", 1 ))}
+					endif
 				endif
 			endif
 		endif		
