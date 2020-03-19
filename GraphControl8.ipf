@@ -545,6 +545,12 @@ End
 function GraphControlInit()
 	string DF=getdatafolder(1)
 	newdatafolder/o/s root:GraphControl
+	string/g ColorTableList
+	newdatafolder/o/s ColorTables
+	//ColorTableList=
+	GCpopulateColorTables()
+	//GCcreateTransColorTables()
+	setdatafolder root:GraphControl
 	make/o/n=(0,9)/t listtext
 	make/o/n=0 listselect
 	make/o/n=9/t listtitle={"Pos","Color","Y wave","X Wave","Y DF","X DF","Y Axis","X Axis","Size"}
@@ -555,7 +561,8 @@ function GraphControlInit()
 	make/o/n=(dimsize(LeftFolderListText,0)*2,4) LeftFolderListColor
 	make/o/n=(dimsize(RightFolderListText,0)*2,4) RightFolderListColor
 	make/t/n=2/o CurrentDF=DF
-
+	//---color tabel waves
+	make/o/n=(256,2) ColorTableShowWave=p
 	make/o/n=(9,4) GCCol
 	GCCol[][0]=60000								//---plot area
 	GCCol[][1]={65535,60000,60000,16000}	//---traces
@@ -566,6 +573,9 @@ function GraphControlInit()
 	GCCol[][6]={60000,65535,65535,32000}	//---folders
 	GCCol[][7]={60000,62000,65535,32000}	//---images
 	GCCol[][8]={62000,60000,65535,32000}	//---trace	
+	//---3d waves
+//	make/o/n=(256,3) Color3d
+//	make/o/n=(256,4) Color3dCol
 
 	variable/g MustUpdate=1
 	string/g axisleft,axisbottom,PlotName="",SubPlotWindows=""
@@ -573,6 +583,9 @@ function GraphControlInit()
 	make/o/t/n=(1,2) DFname=""	
 	dowindow /k GraphControl	//---erase prev. version
 	NewPanel /k=1/W=(200,50,600,600)/n=GraphControl/flt=0 as "Graph Contol" 
+	newimage/host=GraphControl /n=ColorTableDisplay root:GraphControl:ColorTableShowWave
+	setwindow GraphControl hook(click)=ColorTableClickHook
+	setwindow GraphControl activeChildFrame=0
 	//---main buttons
 	Button PLOT_NEW,pos={2,12},size={40,32},proc=GraphControlNewPlot,title="New",win=GraphControl
 	Button PLOT_NEW,fColor=(48896,49152,65280),win=GraphControl
@@ -599,7 +612,6 @@ function GraphControlInit()
 	//---hook functions -link to plots
 	SetWindow GraphControl,hook(newgraphcontrol)=GraphControlPanelHook	
 	SetWindow GraphControl,userdata(showTraces)="1"
-	//PopulateDFLists(-1)
 	PopupMenu PLOT_SUBWINDOW value=#"root:graphcontrol:subplotwindows",win=GraphControl
 	ListBox PLOT_TRACE_LIST,listWave=root:graphcontrol:listtext,win=GraphControl
 	ListBox PLOT_TRACE_LIST,selWave=root:graphcontrol:listselect,win=GraphControl
@@ -612,10 +624,167 @@ function GraphControlInit()
 	FindTopPLot()
 	UpdateFolderColors()
 	GraphControlPanelUpdate()
-	//execute/p/q " updatetracelist(0)"
 	setdatafolder DF	
 end
 
+//---converts all Igor color tables to waves
+Function/s GCpopulateColorTables()
+	string DF=getdatafolder(1)
+	setdatafolder root:GraphControl:ColorTables:
+	variable colT,dd,ff,i
+	//---native color tables
+	for(colT=0;colT<itemsinlist(CTabList());colT++)
+		colorTab2Wave $stringfromlist(colT,CTabList())
+		wave M_colors
+		setscale/I x,0,255,"",M_colors
+		insertpoints/m=1 3,1,M_colors
+		M_colors[][3]=65535
+		make/o/n=(256,4)/free TempCol256=M_colors(x)[q]
+		if(dimsize(M_colors,0)<256)
+			for(i=0;i<3;i++)
+				make/o/n=(dimsize(M_colors,0))/free Temp_colors=m_colors[p][i]
+				interpolate2/n=256/t=1 /y=TempCol_ Temp_colors
+				TempCol256[][i]=TempCol_[p]
+			endfor
+		endif
+		duplicate/o TempCol256,$stringfromlist(colT,CTabList())
+
+	endfor
+	killwaves/z M_colors
+	//---expanded color tables
+	pathinfo igor 
+	newpath/o/q igorCol,( S_path+"Color Tables")
+	for(dd=0;dd<itemsinlist(IndexedDir(igorCol, -1, 0));dd++)	//---all color directories
+		pathinfo igorCol 
+		newpath/o/q igorColDeep,( S_path+IndexedDir(igorCol, dd, 0))
+		string list= Indexedfile(igorColDeep, -1, "????")
+		for(ff=0;ff<itemsinlist(list);ff++)	//---all color directories
+			LoadWave/P=igorColDeep /o/q Indexedfile(igorColDeep, ff, "????")
+			wave newcol=$removeending(S_waveNames)
+			insertpoints/m=1 3,1,newcol
+			newcol[][3]=65535
+			setscale/I x,0,255,"",newcol
+			make/o/n=(256,4)/free TempCol256=newcol(x)[q]
+			if(dimsize(newcol,0)<256)
+				for(i=0;i<3;i++)
+					make/o/n=(dimsize(newcol,0))/free Temp_colors=newcol[p][i]
+					interpolate2/n=256/t=1 /y=TempCol_ Temp_colors
+					TempCol256[][i]=TempCol_[p]
+				endfor
+			endif
+			killwaves/z newcol
+			duplicate/o TempCol256,$replacestring("-",removeending(S_waveNames),"_")
+		endfor
+	endfor 
+	killwaves/z TempCol_,Temp_colors,newcol
+	GCcreateTransColorTables()
+	setdatafolder DF	
+end
+
+//---create transparent versions of the color tables
+function GCcreateTransColorTables()
+	//---create transparent versions
+	string DF=getdatafolder(1)
+	setdatafolder root:GraphControl:
+	svar ColorTableList
+	ColorTableList= removeending(replacestring(",",replacestring("WAVES:",DataFolderDir(2,root:GraphControl:ColorTables),""),";"))
+
+	variable trans,waves
+	for(trans=1;trans<=4;trans++)
+		newdataFolder/s/o root:GraphControl:ColorTables:$"TRANS"+num2str(trans)
+		for(waves=0;waves<itemsinlist(ColorTableList);waves++)
+			duplicate/o root:GraphControl:ColorTables:$stringfromlist(waves,ColorTableList),$stringfromlist(waves,ColorTableList)
+			wave newColwave=$stringfromlist(waves,ColorTableList)
+			newColwave[][3]=65535*((5-trans)/4)
+		endfor
+	endfor
+	setdatafolder DF
+end
+//---create a master wave to show all color tables
+Function MasterColorTable(variable PeakRow, string parentwindow)
+	string DF=getdatafolder(1)
+	variable i,row,col,prevCol=-1,prevrow=-1
+	variable margin_left=32,disp_width=255
+	variable margin_top=4,disp_height=16
+
+	setdatafolder root:GraphControl
+	svar ColorTableList
+	make/o/n=( (PeakRow+0)*(margin_left+disp_width), (ceil(itemsinlist(ColorTableList)/PeakRow)+0)*(margin_top+disp_height),4) ColorTableShowWaveAll,ColorTableShowWaveCol=nan
+	redimension/W/n=(-1,-1,0) ColorTableShowWaveAll
+	setdatafolder root:GraphControl:ColorTables:
+	
+	for(i=0;i<itemsinlist(ColorTableList);i++)	//---all color waves
+		wave colTable=$stringfromlist(i,ColorTableList)
+		row=mod(i,PeakRow)
+		col=floor(i/PeakRow)
+		variable start_left=row*(margin_left+disp_width)+margin_left
+		variable start_top=col*(margin_top+disp_height)+margin_top
+		ColorTableShowWaveAll[start_left-margin_left,start_left+disp_width-1][start_top-margin_top,start_top+disp_height-1]=i
+		ColorTableShowWaveCol[start_left,start_left+disp_width-1][start_top,start_top+disp_height-1][]=colTable[p-start_left][r]
+		
+	endfor
+	//---display the colortables
+	dowindow $parentwindow
+	if(v_flag)
+		if(stringmatch(parentwindow,"GraphControl"))
+			controlinfo/w=GraphControl TRACE_ADVANCE_COLORTABLE_TRANS
+			variable trans=v_value
+			ColorTableShowWaveCol[][][3]=65535*(5-trans)/4
+		else
+			ColorTableShowWaveCol[][][3]=65535
+		endif
+		dowindow/k GraphControlCT
+		getwindow $parentwindow wsize 
+		newpanel/K=1/n=GraphControlCT/w=(v_left+100,v_top,v_left+500,v_top+400) as "Color Tables"
+		NewImage/n=ColorTableImage/host=GraphControlCT root:GraphControl:ColorTableShowWaveCol
+		
+		movesubwindow/w=GraphControlCT#ColorTableImage fnum=(0,0,1,1)
+		ModifyGraph/w=GraphControlCT#ColorTableImage margin=5, nticks=0,axThick=0
+		setwindow GraphControlCT hook(mouseclick)=ColotTableMouseClick,userdata(parent)=parentwindow
+	endif
+	setdatafolder DF	
+end
+//---returns the table number
+Function ColotTableMouseClick(s)
+	STRUCT WMWinHookStruct &s
+	variable setCT=-1
+	if(s.eventCode==3)//---mouse down
+		string DF=getdatafolder(1)
+		setdatafolder root:GraphControl
+		wave ColorTableShowWaveAll
+		svar ColorTableList
+		setCT= ColorTableShowWaveAll[ (s.mouseloc.h-5)*dimsize(ColorTableShowWaveAll,0)/(s.winRect.right-10)][(s.mouseloc.v-5)*dimsize(ColorTableShowWaveAll,1)/(s.winRect.bottom-10)]
+		setdatafolder DF	
+	endif
+	if(setCT>=0)
+		string parent=getuserdata("GraphControlCT","","parent")
+		dowindow $parent
+		if(v_flag)
+			if(stringmatch(parent,"GraphControl"))
+				popupmenu TRACE_ADVANCE_COLORTABLE_NAME,mode=setCT+1,win=$parent
+				changetraceparams("TRACE_ADVANCE_COLORTABLE_NAME",setCT+1,stringfromlist(setCT,ColorTableList))
+				doupdate
+				updatetracecontrols()
+			else		//---color wheel
+				popupmenu ColorTableMenu,mode=setCT+1,win=$parent
+				drawCWshape()
+			endif
+		endif
+		execute /p/q "dowindow/k GraphControlCT"
+	endif
+	return 1
+end
+//---computes and activates the color table window
+Function ColorTableClickHook(s)
+	STRUCT WMWinHookStruct &s
+	if(s.eventCode==3)//---mouse down
+		string name=s.winName
+		getwindow $name wsize
+		if(stringmatch(name,"*colortabledisplay"))
+			MasterColorTable(5,name[0,strsearch(s.winName,"#",0)-1])
+		endif
+	endif
+end
 
 //---gets the name of the most top plot, or a subwindow
 Function FindTopPLot()
@@ -624,7 +793,7 @@ Function FindTopPLot()
 	svar PlotName,SubPlotWindows
 	PlotName=""
 	SubPlotWindows=""
-	String WindowList= winlist("!GraphControl",";","WIN:65")		//---shows all panels and graphs
+	String WindowList= winlist("!GraphControl*",";","WIN:65")		//---shows all panels and graphs
 	variable win=0,found=-1,subwin=0
 	for(win=itemsinlist(WindowList)-1;win>=0;win--)					//---find the most top graph/panel with a subwindow
 		string CurrentWindow=stringfromlist(win,WindowList)
@@ -795,8 +964,6 @@ function GraphControlPanelUpdate([update])
 		SetVariable TRACE_MARKERSIZE,limits={0,10,1},value= _NUM:0,win=GraphControl,disable=showMarkerArea
 		PopupMenu TRACE_MARKER,pos={115.00,plotControlsY+30},size={50.00,19.00},proc=TRACE_PARAMS,win=GraphControl,disable=showMarkerArea
 		PopupMenu TRACE_MARKER,mode=9,value= #"\"*MARKERPOP*\"",win=GraphControl,disable=showMarkerArea
-		PopupMenu TRACEMAIN_TOMODE,pos={300.00,plotControlsY+30},size={51.00,19.00},proc=TRACE_PARAMS,win=GraphControl,disable=showMarkerArea
-		PopupMenu TRACEMAIN_TOMODE,mode=1,popvalue="None",value= #"\"None;Draw to next;Add to next;Stack on next\"",win=GraphControl,disable=showMarkerArea
 
 		CheckBox TRACE_MARKEROPAQUE,pos={169.00,plotControlsY+30+2},size={57.00,15.00},value= 0,proc=TRACE_CHECK,title="Opaque",win=GraphControl,disable=showMarkerArea
 		CheckBox TRACE_MARKERSTROKE,pos={7,plotControlsY+55+2},size={48.00,15.00},value= 0,proc=TRACE_CHECK,title="Stroke",win=GraphControl,disable=showMarkerArea
@@ -819,10 +986,13 @@ function GraphControlPanelUpdate([update])
 		CheckBox TRACE_FILLCOLORneg,pos={7.00,plotControlsY+35+20},size={13.00,13.00},value= 0,proc=TRACE_CHECK,title="",win=GraphControl,disable=showMarkerArea
 		//---advanced
 		PopupMenu TRACE_ADVANCE_SELECT,pos={7.00,plotControlsY+80},size={13.00,13.00},value="Color;Marker size;Marker number",proc=TRACE_ADVANCE_PARAMS,title="Advanced",win=GraphControl,disable=showMarkerArea
-		PopupMenu TRACE_ADVANCE_ZWAVE,pos={180,plotControlsY+80},size={100,19.00},proc=TRACE_PARAMS,title="z wave",mode=3,popvalue="_none_",value= #"FindErrorWavesFolder()",win=GraphControl,disable=showMarkerArea
+		PopupMenu TRACE_ADVANCE_ZWAVE,pos={240,plotControlsY+80},size={100,19.00},proc=TRACE_PARAMS,title="z wave",mode=3,popvalue="_none_",value= #"FindErrorWavesFolder()",win=GraphControl,disable=showMarkerArea
 		CheckBox TRACE_ADVANCE_CHECK_COLOR,pos={5,plotControlsY+100-3},size={37.00,14.00},title="Color",fSize=9,fColor=(21845,21845,21845),mode=1,win=GraphControl,disable=showMarkerArea
 		CheckBox TRACE_ADVANCE_CHECK_SIZE,pos={5,plotControlsY+115-3},size={37.00,14.00},title="Size",fSize=9,fColor=(21845,21845,21845),mode=1,win=GraphControl,disable=showMarkerArea
 		CheckBox TRACE_ADVANCE_CHECK_NUMBER,pos={5,plotControlsY+130-3},size={37.00,14.00},title="Number",fSize=9,fColor=(21845,21845,21845),mode=1,win=GraphControl,disable=showMarkerArea	
+		PopupMenu TRACE_ADVANCE_TOMODE,pos={300.00,plotControlsY+30},size={51.00,19.00},proc=TRACE_PARAMS,win=GraphControl,disable=showMarkerArea
+		PopupMenu TRACE_ADVANCE_TOMODE,mode=1,popvalue="None",value= #"\"None;Draw to next;Add to next;Stack on next\"",win=GraphControl,disable=showMarkerArea
+
 		setdatafolder root:graphcontrol
 		make/o/n=5 plotADVANCEDx={54,54,nan,56,56},plotADVANCEDy={plotControlsY+100,plotControlsY+130,nan,plotControlsY+138,plotControlsY+100}
 		duplicate/o plotADVANCEDx,plotADVANCEDxSAVE
@@ -835,7 +1005,21 @@ function GraphControlPanelUpdate([update])
 		SetVariable TRACE_ADVANCE_COLOR_MIN,pos={113.00,plotControlsY+122},value= _NUM:0,size={80.00,18.00},proc=TRACE_VAR,win=GraphControl,disable=showMarkerArea
 		CheckBox TRACE_ADVANCE_COLOR_MAX_AUTO,pos={210.00,plotControlsY+124},size={45.00,15.00},proc=TRACE_CHECK,title="Auto:",win=GraphControl,disable=showMarkerArea
 		SetVariable TRACE_ADVANCE_COLOR_MAX,pos={258.00,plotControlsY+122},value= _NUM:0,size={80.00,18.00},proc=TRACE_VAR,win=GraphControl,disable=showMarkerArea
-		CheckBox TRACE_ADVANCE_COLOR_REV,pos={306.00,plotControlsY+100},size={56.00,15.00},value= 0,proc=TRACE_CHECK,title="Reverse",win=GraphControl,disable=showMarkerArea
+		CheckBox TRACE_ADVANCE_COLOR_REV,pos={325,plotControlsY+100},size={56.00,15.00},value= 0,proc=TRACE_CHECK,title="Reverse",win=GraphControl,disable=showMarkerArea
+//		SetVariable TRACE_ADVANCE_COLOR_TRANS,pos={265,plotControlsY+100},size={50.00,19.00},proc=TRACE_VAR,title="α",win=GraphControl,disable=showMarkerArea
+//		SetVariable TRACE_ADVANCE_COLOR_TRANS,limits={0,256,1},value= _NUM:256,win=GraphControl,disable=showMarkerArea
+
+		PopupMenu TRACE_ADVANCE_COLORTABLE_TRANS,pos={265,plotControlsY+100},size={50,17.00},proc=TRACE_PARAMS,title="α",win=GraphControl,disable=showMarkerArea
+		PopupMenu TRACE_ADVANCE_COLORTABLE_TRANS,value= #"\"Solid;75%;50%;25%\"",focusring=0,win=GraphControl,disable=showMarkerArea
+		PopupMenu TRACE_ADVANCE_COLORTABLE_NAME,pos={60,plotControlsY+0100},proc=TRACE_PARAMS,win=GraphControl,disable=showMarkerArea
+		PopupMenu TRACE_ADVANCE_COLORTABLE_NAME,value= #"root:GraphControl:colortablelist",bodyWidth=0,win=GraphControl,disable=showMarkerArea
+		controlinfo/w= GraphControl TRACE_ADVANCE_COLORTABLE_NAME
+		if(v_disable==0)
+			
+		//	movesubwindow/w=GraphControl#ColorTableDisplay fnum=(v_right*0+200,v_top+0,1000,v_top+1)
+		endif
+
+		setactiveSubwindow GraphControl
 		//---advanced-marker size
 		SetVariable TRACE_ADVANCE_MARK_MIN,pos={55,plotControlsY+100},title="min Marker size",value= _NUM:1,size={140.00,18.00},proc=TRACE_VAR,win=GraphControl,disable=showMarkerArea
 		SetVariable TRACE_ADVANCE_MARK_MAX,pos={200,plotControlsY+100},title="max Marker size",value= _NUM:10,size={140.00,18.00},proc=TRACE_VAR,win=GraphControl,disable=showMarkerArea
@@ -912,6 +1096,8 @@ function GraphControlPanelUpdate([update])
 			CheckBox $"PLOT_"+axisname+"_MODE_LOG",value= 0,mode=1,win=GraphControl,disable=showAxesArea
 			CheckBox $"PLOT_"+axisname+"_MODE_LOG2",pos={axesLeft+120,axesTop+40},size={41.00,15.00},proc=PLOTAXISMODE,title="Log2",win=GraphControl,disable=showAxesArea
 			CheckBox $"PLOT_"+axisname+"_MODE_LOG2",value= 0,mode=1,win=GraphControl,disable=showAxesArea
+			CheckBox $"PLOT_"+axisname+"_MODE_ZERO",pos={axesLeft+170,axesTop+40},size={41.00,15.00},proc=PLOTAXISMODE,title="Zero",win=GraphControl,disable=showAxesArea
+			CheckBox $"PLOT_"+axisname+"_MODE_ZERO",value= 0,mode=0,win=GraphControl,disable=showAxesArea
 			Button $"PLOT_"+axisname+"_AUTO",pos={axesLeft+260,axesTop+30},size={18,18},proc=AUTOAXIS,title="*",win=GraphControl,disable=showAxesArea
 			SetVariable $"PLOT_"+axisname+"_MAX",pos={axesLeft+280,axesTop+20},size={31.00,18.00},proc=PLOTSIZE,win=GraphControl,disable=showAxesArea
 			SetVariable $"PLOT_"+axisname+"_MAX",labelBack=(65535,65535,65535),value= _NUM:1,win=GraphControl,disable=showAxesArea
@@ -1237,7 +1423,9 @@ function UpdatePlotParams()
 						checkbox $"PLOT_"+axistST+"_MODE_LINEAR" value=(numberbykey("log(x)",axisinfo(WorkingPlotName(),labelname),"=")==0),win=GraphControl
 						checkbox $"PLOT_"+axistST+"_MODE_LOG" value=(numberbykey("log(x)",axisinfo(WorkingPlotName(),labelname),"=")==1),win=GraphControl
 						checkbox $"PLOT_"+axistST+"_MODE_LOG2" value=(numberbykey("log(x)",axisinfo(WorkingPlotName(),labelname),"=")==2),win=GraphControl
+						checkbox $"PLOT_"+axistST+"_MODE_ZERO" value=(numberbykey("zero(x)",axisinfo(WorkingPlotName(),labelname),"=")),win=GraphControl
 						SetVariable $"PLOT_"+axistST+"_LABEL" value=_str:AxisLabel(WorkingPlotName(),labelname),win=GraphControl
+						//print axisinfo(WorkingPlotName(),labelname)
 						//---ticks
 						tickstr=stringbykey("manTick(x)",axisinfo(WorkingPlotName(),s_value),"=")
 						SetVariable $"PLOT_"+axistST+"_TICKS",disable=1,win=GraphControl,value=_num:numberbykey("nticks(x)",axisinfo(WorkingPlotName(),labelname),"=")
@@ -1602,6 +1790,9 @@ Function PLOTAXISMODE(ctrlName,checked) : CheckBoxControl
 		controlinfo/w=GraphControl $"PLOT_AXIS_"+axname
 		if(stringmatch(ctrlName,"*STANDOFF*"))
 			printST= "ModifyGraph/w="+WorkingPlotName()+" standoff("+s_value+")="+num2str(checked)
+		elseif(stringmatch(ctrlName,"*zero"))
+			printST= "ModifyGraph/w="+WorkingPlotName()+" zero("+s_value+")="+num2str(checked)
+
 		else				
 			CheckBox $"PLOT_"+axname+"_MODE_LINEAR" value=0,win=GraphControl
 			CheckBox $"PLOT_"+axname+"_MODE_LOG" value=0,win=GraphControl
@@ -1720,6 +1911,9 @@ Function PLOTSIZE(ctrlName,varNum,varStr,varName) : SetVariableControl
 			variable drawMAX=v_value
 			controlinfo/w=GraphControl $"PLOT_AXIS_" + axname
 			getaxis/w=$WorkingPlotName()/q $S_value	
+			drawMIN=min(100,max(0,drawMIN))
+			drawMAX=min(100,max(0,drawMAX))
+			drawMAX=max(drawMAX,drawMIN+1)
 			printST="ModifyGraph axisEnab("+S_value+")={"+num2str(drawMIN/100)+","+num2str(drawMAX/100)+"}"
 		endif
 		if(stringmatch(ctrlName,"PLOT_*_DISTANCE"))
@@ -2521,7 +2715,7 @@ Function UpdateFolderColors([clicked])
 		setdatafolder root:graphcontrol:	
 		make/o/n=2/t leftright={"left","right"}
 		wave/t listtext,LeftFolderListText,RightFolderListText
-		wave LeftFolderListSelect,RightFolderListSelect
+		wave LeftFolderListSelect,RightFolderListSelect,listselect
 		SetDimLabel 2,1,foreColors,LeftFolderListSelect
 		SetDimLabel 2,1,foreColors,RightFolderListSelect
 		SetDimLabel 2,2,backColors,LeftFolderListSelect
@@ -2658,7 +2852,7 @@ Function DFSELECTListBoxProc(LB_Struct) : ListBoxControl
 	string DFsave=getdatafolder(1)
 	setdatafolder root:GraphControl:
 	//nvar MustUpdate
-	wave DFselect,DFSelectSave,RightFolderListSelect,LeftFolderListSelect
+	wave DFselect,DFSelectSave,RightFolderListSelect,LeftFolderListSelect,listselect
 	make/o/t/n=(0,2) FoldersData	
 	wave/t DFname,RightFolderListText,LeftFolderListText,ListText
 	variable ndim1=-1,npoint1=-1,wtype1=-1,doDFselect=0
@@ -2839,11 +3033,20 @@ Function DFSELECTListBoxProc(LB_Struct) : ListBoxControl
 				endfor
 			endif 
 			if(stringmatch(S_selection,"Replace Y"))
-				ReplaceWave /w=$WorkingPlotName() trace=$ListText[gettracenumber(-1)][2], $DFname[row][1]
+				variable sel
+				for(sel=0;sel<dimsize(listselect,0);sel++)
+					if(listselect[sel][0]>0)
+						ReplaceWave /w=$WorkingPlotName() trace=$ListText[sel][2], $DFname[row][1]
+					endif
+				endfor
 				updatetracelist(0)
 			endif
 			if(stringmatch(S_selection,"Replace X"))
-				ReplaceWave /w=$WorkingPlotName() /X trace=$ListText[gettracenumber(-1)][2], $DFname[row][1]
+				for(sel=0;sel<dimsize(listselect,0);sel++)
+					if(listselect[sel][0]>0)
+						ReplaceWave /w=$WorkingPlotName() /X trace=$ListText[sel][2], $DFname[row][1]
+					endif
+				endfor
 				updatetracelist(0)
 			endif
 			//---new image (for multi-dim waves only)
@@ -2926,11 +3129,9 @@ Function DFSELECTListBoxProc(LB_Struct) : ListBoxControl
 			if(itemsinlist(getdatafolder(1),":")>1)
 				setdatafolder ::
 				DFsave=getdatafolder(1)
-		//		SetVariable PLOT_FOLDER_CURRENTDF ,value= _STR:getdatafolder(1),win=GraphControl
 			endif
 			wavesinDF(doDFselect,ndim1,npoint1,wtype1)
 			execute/q/p "UpdateDirFolder(\""+getdatafolder(1)+"\",\""+leftright[folders]+"\")"
-			//execute /p/q "UpdateDirFolder(\""+NewDF+"\",\""+leftright[1-folders]+"\")"
 		endif
 		if((col==0)&&(row>0))
 			DFselect[][1][0]=(p==row)
@@ -3001,11 +3202,13 @@ End
 function updatetracecontrols()
 	string DF=getdatafolder(1)
 	setdatafolder root:graphcontrol:	
+	svar ColorTableList
 	wave/t ImageListText
+//	wave Color3d,Color3dCol
 	//wave plotADVANCEDx,plotADVANCEDxSAVE
 	string/g enablelist="",disablelist=""
 	string info="",tracename
-	variable found,tnum,i
+	variable found,tnum,i,moveTableColorWindow=1
 	setdatafolder DF
 	dowindow GraphControl
 	if(v_flag)
@@ -3037,7 +3240,7 @@ function updatetracecontrols()
 			tracename=stringfromlist(gettracenumber(-1),TraceNameList(WorkingPlotName(), ";", 1 ))
 			info =traceinfo(WorkingPlotName(),tracename,0)	
 			popupmenu TRACEMAIN_MODE mode=numberbykey("mode(x)",info,"=")+1,win=GraphControl
-			popupmenu TRACEMAIN_TOMODE mode=numberbykey("tomode(x)",info,"=")+1,win=GraphControl
+			popupmenu TRACE_ADVANCE_TOMODE mode=numberbykey("tomode(x)",info,"=")+1,win=GraphControl
 			popupmenu TRACE_FILLTYPEplus mode=numberbykey("hbFill(x)",info,"=")+1,win=GraphControl
 			popupmenu TRACE_FILLTYPEneg mode=numberbykey("hBarNegFill(x)",info,"=")+2,win=GraphControl
 			popupmenu TRACEMAIN_LINE mode=numberbykey("lstyle(x)",info,"=")+1,win=GraphControl
@@ -3089,7 +3292,6 @@ function updatetracecontrols()
 			checkBox TRACE_ADVANCE_CHECK_SIZE,value=strlen(zsize)>0,win=GraphControl
 			string znumber=removeending(replacestring("{",stringbykey("zmrkNum(x)",recreation,"="),""))
 			checkBox TRACE_ADVANCE_CHECK_NUMBER,value=strlen(znumber)>0,win=GraphControl
-
 			if(zmode==1)//---color
 				disablelist=addlistitem("TRACE_ADVANCE_MARK_MAX" ,disablelist)
 				disablelist=addlistitem("TRACE_ADVANCE_MARK_MIN" ,disablelist)
@@ -3097,20 +3299,73 @@ function updatetracecontrols()
 			endif
 			if(zmode==2)//---marker size
 				disablelist=addlistitem("TRACE_ADVANCE_COLOR" ,disablelist)
+				disablelist=addlistitem("TRACE_ADVANCE_COLORTABLE_NAME" ,disablelist)
 				disablelist=addlistitem("TRACE_ADVANCE_COLOR_REV" ,disablelist)
+//				disablelist=addlistitem("TRACE_ADVANCE_TABLE" ,disablelist)
 				command=zsize
 			endif
 			if(zmode==3)//---marker size
 				command=znumber
 				PopupMenu TRACE_ADVANCE_ZWAVE,popvalue=command,mode=1,win=GraphControl
+//				disablelist=addlistitem("TRACE_ADVANCE_TABLE" ,disablelist)
+				disablelist=addlistitem("TRACE_ADVANCE_COLORTABLE_NAME" ,disablelist)
 			endif		
 			if((strlen(command)>1)&&(zmode<3))	//---there are z-color waves
 				found=1
 				string zwave=stringfromlist(0,command,",")
+				//print command
 				PopupMenu TRACE_ADVANCE_ZWAVE,popvalue=zwave,mode=1,win=GraphControl
 				if(zmode==1)//---color
+					string ZColorTable=stringfromlist(3,command,",")
+					variable colorTable=(stringmatch(ZColorTable,"ctableRGB"))+1
+					controlinfo/w= GraphControl TRACE_ADVANCE_COLORTABLE_NAME
+					variable topPos=v_top,rightPos=v_right
+					controlinfo/w= GraphControl TRACE_ADVANCE_COLOR_REV
+					variable rev=v_value
+					disablelist=addlistitem("TRACE_ADVANCE_COLOR" ,disablelist)
+					setwindow graphcontrol#colortabledisplay hide=0
+
+					if(colorTable!=1)
+						string CTname=stringfromlist(5,command,","),TransDF
+						TransDF=CTname[strsearch(CTname,":",strsearch(CTname,":",inf,1)-1,1)+1,strsearch(CTname,":",inf,1)-1]
+						CTname=CTname[strsearch(CTname,":",inf,1)+1,inf]
+						//controlinfo/w=GraphControl TRACE_ADVANCE_COLORTABLE_TRANS
+						//variable trans=v_value
+						if(stringmatch(TransDF,"*TRANS*"))	//---part of the regular colortables
+						
+							if(stringmatch(TransDF,"ColorTables")==0)
+								TransDF="ColorTables:"+TransDF
+							endif
+							TransDF="root:GraphControl:"+(TransDF)+":"+(CTname )
+						else
+							TransDF=stringfromlist(5,command,",")
+						endif
+						ModifyImage/w=GraphControl#ColorTableDisplay ColorTableShowWave ctab= {0,255,$TransDF,rev}
+						wave ColorTableMain=$TransDF
+//						Color3d=ColorTableMain[p][q]/256
+//						Color3dCol=ColorTableMain[p][q]/65535
+						popupMenu TRACE_ADVANCE_COLORTABLE_NAME,mode=whichlistitem(CTname,ColorTableList)+1,win=GraphControl
+						variable transMode=1
+						if(stringmatch(TransDF,"*ColorTables:TRANS2*"))
+							transMode=2
+						elseif(stringmatch(TransDF,"*ColorTables:TRANS3*"))
+							transMode=3
+						elseif(stringmatch(TransDF,"*ColorTables:TRANS4*"))
+							transMode=4
+						endif
+					//	print transMode,TransDF
+						popupMenu TRACE_ADVANCE_COLORTABLE_TRANS,mode=transMode,win=GraphControl
+
+					elseif(colorTable!=2)
+//						disablelist=addlistitem("TRACE_ADVANCE_COLORTABLE_NAME" ,disablelist)
+					endif
+					rightPos=200
+					ModifyGraph /w=GraphControl#ColorTableDisplay margin=-1,width=250-rightPos,height=17,nticks=0,axThick=0
+					movesubwindow/w=GraphControl#ColorTableDisplay fnum=(rightPos+10,topPos+0,1000,topPos+1)
+
 					PopupMenu TRACE_ADVANCE_COLOR mode=whichlistitem( stringfromlist(3,command,","),CTabList())+1,win=GraphControl
-					CheckBox TRACE_ADVANCE_COLOR_REV,value=strlen(stringfromlist(4,command,",")),win=GraphControl
+					//print stringfromlist(4,command,","),command
+					CheckBox TRACE_ADVANCE_COLOR_REV,value=str2num(stringfromlist(4,command,",")),win=GraphControl
 				endif
 				if(zmode<3)//---color/size
 					minst=stringfromlist(1,command,",")
@@ -3167,6 +3422,8 @@ function updatetracecontrols()
 				endif				
 
 			else
+				disablelist=addlistitem("TRACE_ADVANCE_COLORTABLE_TRANS" ,disablelist)
+				disablelist=addlistitem("TRACE_ADVANCE_COLORTABLE_NAME" ,disablelist)
 				disablelist=addlistitem("TRACE_ADVANCE_COLOR" ,disablelist)
 				disablelist=addlistitem("TRACE_ADVANCE_COLOR_REV" ,disablelist)
 				disablelist=addlistitem("TRACE_ADVANCE_COLOR_MIN_AUTO" ,disablelist)
@@ -3237,6 +3494,12 @@ function updatetracecontrols()
 		endfor
 		for(i=0;i<itemsinlist(disablelist);i+=1)	//disable controls not in use
 			modifycontrollist stringfromlist(i,disablelist) disable=1,win=GraphControl 
+			if(stringmatch(stringfromlist(i,disablelist),"TRACE_ADVANCE_COLORTABLE_NAME") )
+				setwindow graphcontrol#colortabledisplay hide=1
+			//movesubwindow/w=GraphControl#ColorTableDisplay fnum=(400,0,120,10)
+				//ModifyGraph /w=GraphControl#ColorTableDisplay width=2//,frame=1
+			endif
+
 		endfor
 	endif
 	setdatafolder DF
@@ -3469,11 +3732,16 @@ Function TRACEREMOVE(this0all1other2)
 	string DF=getdatafolder(1)
 	setdatafolder root:graphcontrol:	
 	nvar MustUpdate
-	variable	tnum,i
+	variable	tnum,i,sel
 	wave listselect
 	string wavesST=""
 	if((this0all1other2==0)&&(gettracenumber(-1)>=0))//---selected
 		wavesST=stringfromlist(gettracenumber(-1),TraceNameList(WorkingPlotName(), ";", 1 ))
+//		for(sel=0;sel<dimsize(listselect,0);sel++)
+//			if(listselect[sel][0]>0)
+//				wavesST+=stringfromlist(gettracenumber(-1),TraceNameList(WorkingPlotName(), ";", 1 ))+","
+//			endif
+//		endfor
 	endif
 	if(this0all1other2>0)	//---all
 		wavesST=(replacestring(";",TraceNameList(WorkingPlotName(), ";", 1 ),","))	
@@ -3642,7 +3910,7 @@ function changetraceparams(ctrlName,Num,Str)
 	string DF=getdatafolder(1)
 	setdatafolder root:graphcontrol:
 	variable tnum
-	wave listselect
+	wave listselect//,Color3d,Color3dCol
 	variable r,g,b
 	string printST
 	for (tnum=0;tnum<dimsize(listselect,0);tnum+=1)
@@ -3651,10 +3919,6 @@ function changetraceparams(ctrlName,Num,Str)
 			if (stringmatch(ctrlName,"TRACEMAIN_MODE"))//mode style
 				printST= " mode(" +tracename+")="+num2str(Num-1)
 				execute/p/q "updatetracecontrols()"	
-			endif
-			if (stringmatch(ctrlName,"TRACEMAIN_TOMODE"))//mode style
-				printST= " tomode(" +tracename+")="+num2str(Num-1)
-//				execute/p/q "updatetracecontrols()"	
 			endif
 
 			if ((stringmatch(ctrlName,"TRACEMAIN_COL"))|| (stringmatch(ctrlName,"TRACEMAIN_COLTRANS")))//color
@@ -3723,83 +3987,101 @@ function changetraceparams(ctrlName,Num,Str)
 			endif	
 			//---advanced
 			if (stringmatch(ctrlName,"*ADVANCE*"))//---z waves
-				controlinfo/w=GraphControl TRACE_ADVANCE_SELECT
-				variable found=0,zmode=v_value
-				string execST="",ztype=""
-				controlinfo/w=GraphControl TRACE_ADVANCE_ZWAVE
-				string zwave=s_value
-				if(zmode==1)//---color
-					if(stringmatch(zwave,"_none_"))	//---remove z color wave
-					 	printST=  "zColor(" +tracename+")=0"
-					else	//---z color present
-						found=1
-						variable directRGB=0
-						if(waveexists($zwave))
-							if( (dimsize($zwave,1)==3)||(dimsize($zwave,1)==4))	//---direct RGB
-								directRGB=1
-							endif
-						endif
-						if(directRGB)
-							execST="directRGB,0"
-						else
-							controlinfo /w=GraphControl TRACE_ADVANCE_COLOR
-							variable color=v_value
-							controlinfo /w=GraphControl TRACE_ADVANCE_COLOR_REV
-							variable rev=v_value	
-							execST=stringfromlist(color-1,CTabList())+","+num2str(rev)
-						endif
-					endif	
-					ztype="zColor"
-				endif
-				if(zmode==2)//---marker size
-					if(stringmatch(zwave,"_none_"))	//---remove z color wave
-					 	printST=  " zmrkSize(" +tracename+")=0"
-					else	//---z color present
-						found=1
-						controlinfo /w=GraphControl TRACE_ADVANCE_MARK_MAX
-						variable mrkmax=v_value
-						controlinfo /w=GraphControl TRACE_ADVANCE_MARK_MIN
-						variable mrkmin=v_value	
-						execST=num2str(mrkmin)+","+num2str(mrkmax)
-					endif	
-					ztype="zmrkSize"
-				endif
-				if(zmode==3)//---marker type
-					if(stringmatch(zwave,"_none_"))	//---remove z color wave
-					 	printST=  "zmrkNum(" +tracename+")=0"
-					else	//---z color present
-					 	printST=  "zmrkNum(" +tracename+")={"+zwave+"}"
-					endif	
-				endif
+				if( (stringmatch(ctrlName,"TRACE_ADVANCE_COLORTABLE_NAME"))||(stringmatch(ctrlName,"TRACE_ADVANCE_COLORTABLE_TRANS")) )//mode style
+					controlinfo/w=GraphControl TRACE_ADVANCE_COLORTABLE_NAME
+					string CTst=s_value
 
-				string minst="*",maxst="*"
-				if(waveexists($zwave))				
-					variable minval=wavemin($zwave)
-					variable maxval=wavemax($zwave)
-				else
-					minval=0
-					maxval=1
-				endif	
-				controlinfo /w=GraphControl TRACE_ADVANCE_COLOR_MIN_AUTO
-				if(v_value)
-					SetVariable TRACE_ADVANCE_COLOR_MIN,value=_num:minval,win=GraphControl				
-				else
-					controlinfo /w=GraphControl TRACE_ADVANCE_COLOR_MIN
-					minst=num2str(v_value)
-					CheckBox TRACE_ADVANCE_COLOR_MIN_AUTO,value=(v_value==minval),win=GraphControl
+					controlinfo/w=GraphControl TRACE_ADVANCE_COLORTABLE_TRANS
+					variable trans=v_value
+					ModifyImage/w=GraphControl#ColorTableDisplay ColorTableShowWave ctab= {0,255,$"root:GraphControl:Colortables:TRANS"+num2str(trans)+":"+CTst,0}
+					wave ColorTableMain=$"root:GraphControl:Colortables:TRANS"+num2str(trans)+":"+CTst
+//					Color3d=ColorTableMain[p][q]/256
+//					Color3dCol=ColorTableMain[p][q]/65535
+
 				endif
-				controlinfo /w=GraphControl TRACE_ADVANCE_COLOR_MAX_AUTO
-				if(v_value)
-					SetVariable TRACE_ADVANCE_COLOR_MAX,value=_num:maxval,win=GraphControl				
+				if (stringmatch(ctrlName,"TRACE_ADVANCE_TOMODE"))//mode style
+					printST= " tomode(" +tracename+")="+num2str(Num-1)
 				else
-					controlinfo /w=GraphControl TRACE_ADVANCE_COLOR_MAX
-					maxst=num2str(v_value)
-					CheckBox TRACE_ADVANCE_COLOR_MAX_AUTO,value=(v_value==maxval),win=GraphControl
+
+					controlinfo/w=GraphControl TRACE_ADVANCE_SELECT
+					variable found=0,zmode=v_value
+					string execST="",ztype=""
+					controlinfo/w=GraphControl TRACE_ADVANCE_ZWAVE
+					string zwave=s_value
+					if(zmode==1)//---color
+						if(stringmatch(zwave,"_none_"))	//---remove z color wave
+						 	printST=  "zColor(" +tracename+")=0"
+						else	//---z color present
+							found=1
+							variable directRGB=0
+							if(waveexists($zwave))
+								if( (dimsize($zwave,1)==3)||(dimsize($zwave,1)==4))	//---direct RGB
+									directRGB=1
+								endif
+							endif
+							if(directRGB)
+								execST="directRGB,0"
+							else
+								controlinfo /w=GraphControl TRACE_ADVANCE_COLORTABLE_NAME
+								string colorTable=s_value
+								controlinfo /w=GraphControl TRACE_ADVANCE_COLOR_REV
+								variable rev=v_value	
+								controlinfo/w=GraphControl TRACE_ADVANCE_COLORTABLE_TRANS
+								variable transDF=v_value
+								execST="ctableRGB,"+num2str(rev)+",root:graphcontrol:colortables:TRANS"+num2str(transDF)+":"+colorTable
+							endif
+						endif	
+						ztype="zColor"
+					endif
+					if(zmode==2)//---marker size
+						if(stringmatch(zwave,"_none_"))	//---remove z color wave
+						 	printST=  " zmrkSize(" +tracename+")=0"
+						else	//---z color presentctableRGBctableRGB
+							found=1
+							controlinfo /w=GraphControl TRACE_ADVANCE_MARK_MAX
+							variable mrkmax=v_value
+							controlinfo /w=GraphControl TRACE_ADVANCE_MARK_MIN
+							variable mrkmin=v_value	
+							execST=num2str(mrkmin)+","+num2str(mrkmax)
+						endif	
+						ztype="zmrkSize"
+					endif
+					if(zmode==3)//---marker type
+						if(stringmatch(zwave,"_none_"))	//---remove z color wave
+						 	printST=  "zmrkNum(" +tracename+")=0"
+						else	//---z color present
+						 	printST=  "zmrkNum(" +tracename+")={"+zwave+"}"
+						endif	
+					endif
+	
+					string minst="*",maxst="*"
+					if(waveexists($zwave))				
+						variable minval=wavemin($zwave)
+						variable maxval=wavemax($zwave)
+					else
+						minval=0
+						maxval=1
+					endif	
+					controlinfo /w=GraphControl TRACE_ADVANCE_COLOR_MIN_AUTO
+					if(v_value)
+						SetVariable TRACE_ADVANCE_COLOR_MIN,value=_num:minval,win=GraphControl				
+					else
+						controlinfo /w=GraphControl TRACE_ADVANCE_COLOR_MIN
+						minst=num2str(v_value)
+						CheckBox TRACE_ADVANCE_COLOR_MIN_AUTO,value=(v_value==minval),win=GraphControl
+					endif
+					controlinfo /w=GraphControl TRACE_ADVANCE_COLOR_MAX_AUTO
+					if(v_value)
+						SetVariable TRACE_ADVANCE_COLOR_MAX,value=_num:maxval,win=GraphControl				
+					else
+						controlinfo /w=GraphControl TRACE_ADVANCE_COLOR_MAX
+						maxst=num2str(v_value)
+						CheckBox TRACE_ADVANCE_COLOR_MAX_AUTO,value=(v_value==maxval),win=GraphControl
+					endif
+					if(found)
+						printST=  ztype+"(" +tracename+")= {"+zwave+","+minst+","+maxst+","+execST+"}"
+					endif
 				endif
-				if(found)
-					printST=  ztype+"(" +tracename+")= {"+zwave+","+minst+","+maxst+","+execST+"}"
-				endif
-				
 			endif
 			//---offset
 			if(stringmatch(ctrlName,"TRACE_OFFSET_*"))
@@ -3856,13 +4138,16 @@ Function TRACELIST(LB_Struct) : ListBoxControl
 						PopupContextualMenu getaxistype(0)
 						tracecopy("")
 						traceremove(0)
-						pastetrace(stringfromlist(V_flag-1,getaxistype(0)),"")
+						pastetrace(S_selection,"")
+
+						//pastetrace(stringfromlist(V_flag-1,getaxistype(0)),"")
 					endif
 					if(stringmatch(listtitle[col],"X axis"))
 						PopupContextualMenu getaxistype(1)
 						tracecopy("")
 						traceremove(0)
-						pastetrace("",stringfromlist(V_flag-1,getaxistype(1)))
+						pastetrace("",S_selection)
+						//pastetrace("",stringfromlist(V_flag-1,getaxistype(1)))
 					endif
 				endif
 				if(stringmatch(listtitle[col],"Y wave"))
@@ -3995,7 +4280,7 @@ Function TRACELIST(LB_Struct) : ListBoxControl
 	setdatafolder $DF
 	doupdate/w=graphcontrol
 	SetVariable PLOT_FOLDER_CURRENTDF ,value= _STR:getdatafolder(1),win=GraphControl
-	execute/p/q "GraphControlPanelUpdate()"
+//	execute/p/q "GraphControlPanelUpdate()"
 	if(event==2)
 		if(row<=dimsize(listselect,0)-1)	
 			PopulateDFLists()
