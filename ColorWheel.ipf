@@ -3,11 +3,15 @@
 //Function to create the color wheel panel
 Macro ColorWheelPlot()
 	string DF=getdatafolder(1)
-	dowindow /f ColorWheelPanel
+	dowindow /f GraphControlCW
 	if(v_flag==0)
-		newdatafolder/o/s root:colorwheel		 
+		newdatafolder/o/s root:GraphControl
+		string/g ColorTableList
+		newdatafolder/o/s ColorTables
+		GCpopulateColorTables()
+		newdatafolder/o/s root:GraphControl:colorwheel	 
 		RecreateWaves()
-		execute "ColorWheelPanel()"		
+		execute "InitGraphControlCW()"		
 	endif
 	setdatafolder $DF
 end
@@ -15,15 +19,15 @@ end
 //update of the controls on the CW panel
 Function updateCWcontrols()
 	string DF=getdatafolder(1)
-	setdatafolder root:colorwheel:
+	setdatafolder root:GraphControl:colorwheel:
 	nvar NumColors,ColorMain,ColorSepAxis1,ColorSepAxis2,ColorBrightness	
-	SetVariable AxisColor1,disable=(NumColors==1),win=ColorWheelPanel
+	SetVariable AxisColor1,disable=(NumColors==1),win=GraphControlCW
 	variable i
 	for(i=1;i<=6;i+=1)
-		PopupMenu $"ColorResult"+num2str(i) ,disable=1-(i<NumColors+1),win=ColorWheelPanel
-		SetVariable $"ColorR"+num2str(i) noedit=0,disable=1-(i<NumColors+1),win=ColorWheelPanel
-		SetVariable $"ColorG"+num2str(i) noedit=0,disable=1-(i<NumColors+1),win=ColorWheelPanel
-		SetVariable $"ColorB"+num2str(i) noedit=0,disable=1-(i<NumColors+1),win=ColorWheelPanel
+		PopupMenu $"ColorResult"+num2str(i) ,disable=1-(i<NumColors+1),win=GraphControlCW
+		SetVariable $"ColorR"+num2str(i) noedit=0,disable=1-(i<NumColors+1),win=GraphControlCW
+		SetVariable $"ColorG"+num2str(i) noedit=0,disable=1-(i<NumColors+1),win=GraphControlCW
+		SetVariable $"ColorB"+num2str(i) noedit=0,disable=1-(i<NumColors+1),win=GraphControlCW
 	endfor
 	ColorMain=mod(ColorMain,12)
 	ColorMain+=(ColorMain<0)*12
@@ -35,16 +39,16 @@ Function updateCWcontrols()
 	endif
 	if(NumColors==3)	//triangle
 		ColorSepAxis2=12-ColorSepAxis1*2
-		SetVariable AxisColor1,limits={1,5,1},win=ColorWheelPanel
+		SetVariable AxisColor1,limits={1,5,1},win=GraphControlCW
 
 	endif
 	if(NumColors==4)	//rectangle
 		ColorSepAxis2=6-ColorSepAxis1
-		SetVariable AxisColor1,limits={1,4,1},win=ColorWheelPanel
+		SetVariable AxisColor1,limits={1,4,1},win=GraphControlCW
 	endif	
 	if(NumColors==6)	//heaxagon, 2 positions
 		ColorSepAxis2=4-ColorSepAxis1
-		SetVariable AxisColor1,limits={1,3,1},win=ColorWheelPanel
+		SetVariable AxisColor1,limits={1,3,1},win=GraphControlCW
 	endif	
 	GroupBox IndividualColorsGB size={290,max(NumColors,4)*20+20}
 	setdatafolder $DF
@@ -65,15 +69,19 @@ End
 //colors of the CW, circular about 12
 Function/wave CWcol(location,Brightness)		
 	variable location,Brightness
+	string DF=getdatafolder(1)
+	setdatafolder root:GraphControl:
+	wave ColorTableShowWave
+	setdatafolder root:GraphControl:colorwheel:
 	wave/t  color_wheel_names
 	make/o/n=3 col
 	variable	location12=mod(location,12)
 	location12+=(location12<0)*12
-	controlinfo/w=ColorWheelPanel ColortableTypeTable
+	controlinfo/w=GraphControlCW ColortableTypeTable
 	if(v_value)	//---igor color table
-		controlinfo/w=ColorWheelPanel ColorTableMenu 
-		colorTab2Wave $S_Value
-		wave M_colors
+		controlinfo/w=GraphControlCW ColorTableMenu 
+		wave M_colors=root:graphcontrol:colortables:$s_value
+		ModifyImage/w=GraphControlCW#ColorTableDisplay ColorTableShowWave ctab= {0,255,root:GraphControl:ColorTables:$(s_value),0}
 		col=M_colors[floor(location12/12*dimsize(M_colors,0))][p]
 		if(Brightness<3)
 			col-=(col[p])*(3-Brightness)/6
@@ -84,44 +92,55 @@ Function/wave CWcol(location,Brightness)
 	else 	//---color wheel
 		execute "col=color_"+color_wheel_names[location12]+"["+num2str(Brightness)+"][p]"
 	endif
+	setdatafolder $DF
 	return col
 end
 
 //draws the color selection
 function drawCWshape()
 	string DF=getdatafolder(1)
-	setdatafolder root:colorwheel:
+	setdatafolder root:GraphControl:colorwheel:
 	wave/t color_wheel_names
-	nvar NumColors,ColorMain,ColorSepAxis1,ColorSepAxis2,ColorBrightness	,tableupdate
+	nvar NumColors,ColorMain,ColorSepAxis1,ColorSepAxis2,ColorBrightness	
 	make/o/n=(NumColors+1) color_selection_drawX,color_selection_drawY
 	variable location=ColorMain,i,location12,col,br
 	for(i=0;i<NumColors;i+=1)		
 		color_selection_drawX[i]=-(6-ColorBrightness)*sin(location/6*PI)
 		color_selection_drawY[i]=(6-ColorBrightness)*cos(location/6*PI)
-		PopupMenu $"ColorResult"+num2str(i+1) popColor=(CWcol(location,ColorBrightness)[0],CWcol(location,ColorBrightness)[1],CWcol(location,ColorBrightness)[2]),win=ColorWheelPanel
-		SetVariable $"ColorR"+num2str(i+1) value=_NUM:CWcol(location,ColorBrightness)[0],win=ColorWheelPanel
-		SetVariable $"ColorG"+num2str(i+1) value=_NUM:CWcol(location,ColorBrightness)[1],win=ColorWheelPanel
-		SetVariable $"ColorB"+num2str(i+1) value=_NUM:CWcol(location,ColorBrightness)[2],win=ColorWheelPanel
+		PopupMenu $"ColorResult"+num2str(i+1) popColor=(CWcol(location,ColorBrightness)[0],CWcol(location,ColorBrightness)[1],CWcol(location,ColorBrightness)[2]),win=GraphControlCW
+		SetVariable $"ColorR"+num2str(i+1) value=_NUM:floor(CWcol(location,ColorBrightness)[0]/256),win=GraphControlCW
+		SetVariable $"ColorG"+num2str(i+1) value=_NUM:floor(CWcol(location,ColorBrightness)[1]/256),win=GraphControlCW
+		SetVariable $"ColorB"+num2str(i+1) value=_NUM:floor(CWcol(location,ColorBrightness)[2]/256),win=GraphControlCW
 
 		location+=mod(i+1,2)*ColorSepAxis1+mod(i,2)*ColorSepAxis2
 	endfor
 	color_selection_drawX[NumColors]=color_selection_drawX[0]
 	color_selection_drawY[NumColors]=color_selection_drawY[0]
 	//ModifyGraph marker(color_selection_drawY[0])=1
-	//ModifyGraph/w=ColorWheelPanel#ColorWheelPlot 
+	//ModifyGraph/w=GraphControlCW#ColorWheelPlot 
 	for(col=0;col<12;col++)
 		make/o/n=(6,3) color_z
 		for(br=0;br<6;br++)
 			color_z[br][]=CWcol(col,br)[q]
 		endfor
 		duplicate/o color_z,$"color_z"+num2str(col)
-		ModifyGraph/w=ColorWheelPanel#ColorWheelPlot zColor($"CWschemeY"+num2str(col))={$"color_z"+num2str(col),*,*,directRGB}
+		ModifyGraph/w=GraphControlCW#ColorWheelPlot zColor($"CWschemeY"+num2str(col))={$"color_z"+num2str(col),*,*,directRGB}
 
 	endfor	
-	setdatafolder $DF
-	if(tableupdate)
+	controlinfo/w=GraphControlCW ColortableUpdate
+	if(v_value)
 		CopyToTable()
 	endif
+	controlinfo/w=GraphControlCW ColortableUpdate3D
+	if(v_value)
+		CopyToTableBTN("CopyTo3D")
+	endif	
+	controlinfo/w=GraphControlCW ColortableUpdate3D_CT
+	if(v_value)
+		CopyToTableBTN("CopyTo3D_CT")
+	endif	
+	setdatafolder $DF
+
 end
 
 //shows the control of selected nodes
@@ -131,20 +150,20 @@ Function DisplayIndividualColors(ctrlName,varNum,varStr,varName) : SetVariableCo
 	String varStr
 	String varName
 	string DF=getdatafolder(1)
-	setdatafolder root:colorwheel:
+	setdatafolder root:GraphControl:colorwheel:
 	
 	//---update the popup window
-	controlinfo/w=ColorWheelPanel ColorTableR
-	variable r=v_value
-	controlinfo/w=ColorWheelPanel ColorTableG
-	variable g=v_value
-	controlinfo/w=ColorWheelPanel ColorTableB
-	variable b=v_value
-	controlinfo/w=ColorWheelPanel ColorTableALPHA
-	variable alpha=v_value		
-	PopupMenu ColorLocationPM popColor=(r,g,b,alpha),win=ColorWheelPanel
+	controlinfo/w=GraphControlCW ColorTableR
+	variable r=v_value*256
+	controlinfo/w=GraphControlCW ColorTableG
+	variable g=v_value*256
+	controlinfo/w=GraphControlCW ColorTableB
+	variable b=v_value*256
+	controlinfo/w=GraphControlCW ColorTableALPHA
+	variable alpha=v_value*256
+	PopupMenu ColorLocationPM popColor=(r,g,b,alpha),win=GraphControlCW
 	wave ColorTableLocation,ColorTableMainB,ColorTableMainG,ColorTableMainR	,ColorTableMainAlpha
-	controlinfo /w =ColorWheelPanel ColorLocations
+	controlinfo /w =GraphControlCW ColorLocations
 	variable selLocation=v_value-1
 	ColorTableMainR[selLocation]=r
 	ColorTableMainG[selLocation]=g
@@ -163,13 +182,13 @@ End
 function updateColorTableSlider(recalculate)
 	variable recalculate
 	string DF=getdatafolder(1)
-	setdatafolder root:colorwheel:
-	nvar minscale,maxscale
+	setdatafolder root:GraphControl:colorwheel:
+	//nvar minscale,maxscale
 	wave  ColorTableMain,ColorTableLocation
-	controlinfo /w=ColorWheelPanel  ColorTableSlider1
+	controlinfo /w=GraphControlCW  ColorTableSlider1
 	variable pos=min(v_value,100)
 	if(recalculate)
-		controlinfo /w =ColorWheelPanel ColorLocations
+		controlinfo /w =GraphControlCW ColorLocations
 		variable selLocation=v_value-1,okchange=1			
 		if(selLocation>0)
 			ColorTableLocation[selLocation]=max(ColorTableLocation[selLocation-1]+1,ColorTableLocation[selLocation])
@@ -177,17 +196,17 @@ function updateColorTableSlider(recalculate)
 		if(selLocation<numpnts(ColorTableLocation)-1)
 			ColorTableLocation[selLocation]=min(ColorTableLocation[selLocation+1]-1,ColorTableLocation[selLocation])
 		endif
-		ColorTableLocation[selLocation]=pos*(maxscale-minscale)/100+minscale
+		ColorTableLocation[selLocation]=pos
 		CalculateColorTable()
 		UpdateSelectedLocation(selLocation)
 	endif	
 	//print pos
-	Slider ColorTableSlider1 labelBack=(ColorTableMain[pos][0],ColorTableMain[pos][1],ColorTableMain[pos][2],ColorTableMain[pos][3]),win=ColorWheelPanel
-	SetVariable ColorTableR value= _NUM:floor(ColorTableMain[pos][0]),win=ColorWheelPanel
-	SetVariable ColorTableG value= _NUM:floor(ColorTableMain[pos][01]),win=ColorWheelPanel
-	SetVariable ColorTableB value= _NUM:floor(ColorTableMain[pos][02]),win=ColorWheelPanel
-	SetVariable ColorTableALPHA value= _NUM:floor(ColorTableMain[pos][03]),win=ColorWheelPanel
-	PopupMenu ColorLocationPM popColor=(ColorTableMain[pos][0],ColorTableMain[pos][1],ColorTableMain[pos][2],ColorTableMain[pos][3]),win=ColorWheelPanel
+	Slider ColorTableSlider1 labelBack=(ColorTableMain(pos)[0],ColorTableMain(pos)[1],ColorTableMain(pos)[2],ColorTableMain(pos)[3]),win=GraphControlCW
+	SetVariable ColorTableR value= _NUM:floor(ColorTableMain(pos)[0]/256),win=GraphControlCW
+	SetVariable ColorTableG value= _NUM:floor(ColorTableMain(pos)[01]/256),win=GraphControlCW
+	SetVariable ColorTableB value= _NUM:floor(ColorTableMain(pos)[02]/256),win=GraphControlCW
+	SetVariable ColorTableALPHA value= _NUM:floor(ColorTableMain(pos)[03]/256),win=GraphControlCW
+	PopupMenu ColorLocationPM popColor=(ColorTableMain(pos)[0],ColorTableMain(pos)[1],ColorTableMain(pos)[2],ColorTableMain(pos)[3]),win=GraphControlCW
 	setdatafolder $DF
 end
 
@@ -196,7 +215,7 @@ end
 
 Function CopyToTable1()
 	string DF=getdatafolder(1)
-	setdatafolder root:colorwheel:
+	setdatafolder root:GraphControl:colorwheel:
 	
 	nvar NumColors,ColorMain,ColorSepAxis1,ColorSepAxis2,ColorBrightness,Bright
 	variable location=ColorMain,i,br
@@ -208,9 +227,9 @@ Function CopyToTable1()
 		BrLevels=ColorBrightness+1
 	endif
 	TotalColors=(NumColors)*(BrLevels*2)-NumColors+1
-	Slider ColorTableSlider1 limits={0,TotalColors-2,1},win=ColorWheelPanel 
-	make/o/n=(TotalColors,4) ColorTableMain=65535
-	make/o/n=(TotalColors,10) ColorTableShow=p
+	Slider ColorTableSlider1 limits={0,TotalColors-2,1},win=GraphControlCW 
+	make/o/n=(256,4) ColorTableMain=65535
+	make/o/n=(256,10) ColorTableShow=p
 	variable count=0
 	for(i=0;i<NumColors;i+=1)			
 		if(Bright)
@@ -240,22 +259,22 @@ end
 //takes the CW selection as nodes in color table
 Function CopyToTable()
 	string DF=getdatafolder(1)
-	setdatafolder root:colorwheel:	
-	nvar NumColors,ColorMain,ColorSepAxis1,ColorSepAxis2,ColorBrightness,Bright,minscale,maxscale
+	setdatafolder root:GraphControl:colorwheel:	
+	nvar NumColors,ColorMain,ColorSepAxis1,ColorSepAxis2,ColorBrightness,Bright//,minscale,maxscale
 	variable location=ColorMain,i,br
 	variable BrStops,TotalColors=NumColors,DkStops,BetweenStopValue=0
-	Slider ColorTableSlider1 limits={0,101,1},win=ColorWheelPanel 
-	controlinfo/w=ColorWheelPanel ColortableBright
+	Slider ColorTableSlider1 limits={0,101,1},win=GraphControlCW 
+	controlinfo/w=GraphControlCW ColortableBright
 	BrStops=v_value
 	if(BrStops)
 		BetweenStopValue=5
 	endif
-	controlinfo/w=ColorWheelPanel ColortableDark
+	controlinfo/w=GraphControlCW ColortableDark
 	DkStops=v_value	
 	TotalColors+=(DkStops||BrStops)*(NumColors*2-2)
 
-	make/o/n=(TotalColors) ColorTableMainR,ColorTableMainG,ColorTableMainB,ColorTableMainAlpha,ColorTableLocation=p/(TotalColors-1)*(maxscale-minscale)+minscale
-	make/o/n=(TotalColors,10) ColorTableShow=(q<5) ? p : -1
+	make/o/n=(TotalColors) ColorTableMainR,ColorTableMainG,ColorTableMainB,ColorTableMainAlpha,ColorTableLocation=p/(TotalColors-1)*(100)
+	make/o/n=(256,10) ColorTableShow=(q<5) ? p : -1
 
 	variable count=0
 	for(i=0;i<TotalColors;i+=1)	
@@ -278,26 +297,26 @@ Function CopyToTable()
 end
 
 //converts location to percent
-function LocationToPercent(input)
-	variable input
-	string DF=getdatafolder(1)
-	setdatafolder root:colorwheel:	
-	nvar minscale,maxscale	
-	return (input-minscale)/(maxscale-minscale)*100
-	setdatafolder $DF
-end
+//function LocationToPercent(input)
+//	variable input
+//	string DF=getdatafolder(1)
+//	setdatafolder root:GraphControl:colorwheel:	
+//	//nvar minscale,maxscale	
+//	return (input-minscale)/(maxscale-minscale)*100
+//	setdatafolder $DF
+//end
 
 //changes the scaling of the color tabel to 100 points
-function/wave interpolateCT(NumPoints,ColorTableColor,ColorTableLocation)
-	variable NumPoints
+function/wave interpolateCT(ColorTableColor,ColorTableLocation)
 	wave ColorTableColor,ColorTableLocation
+	variable NumPoints=256
 	variable i,pnt,startloc,endloc,loc
-	make/o/n=(NumPoints) outputwave=ColorTableColor[numpnts(ColorTableLocation)-1]
-	outputwave[0,LocationToPercent(ColorTableLocation[0])]=ColorTableColor[0]
+	make/o/n=(256) outputwave=ColorTableColor[numpnts(ColorTableLocation)-1]
+	outputwave[0,ColorTableLocation[0]*2.56]=ColorTableColor[0]
 	for (pnt=0;pnt<numpnts(ColorTableLocation)-1;pnt+=1)
-		startloc=LocationToPercent(ColorTableLocation[pnt])
-		endloc=min(LocationToPercent(ColorTableLocation[pnt+1]),NumPoints-1)
-		for (loc=startloc;loc<endloc;loc+=1)
+		startloc=floor(ColorTableLocation[pnt]*2.56)
+		endloc=floor(min(ColorTableLocation[pnt+1]*2.56,NumPoints-1))
+		for (loc=(startloc);loc<(endloc);loc+=1)
 			outputwave[loc]=(loc-startloc)/(endloc-startloc)*(ColorTableColor[pnt+1]-ColorTableColor[pnt])+ColorTableColor[pnt]
 		endfor
 	endfor
@@ -307,35 +326,39 @@ end
 //changes the scaling of the color table to 100 points
 function CalculateColorTable()
 	string DF=getdatafolder(1)
-	setdatafolder root:colorwheel:	
-	nvar minscale,maxscale
+	setdatafolder root:GraphControl:colorwheel:	
+	//nvar minscale,maxscale
 	wave ColorTableMainR,ColorTableMainG,ColorTableMainB,ColorTableLocation,ColorTableMainAlpha
 	make/o/n=(numpnts(ColorTableLocation)) ColorTableLocX=5
-	make/o/n=101 CTMR,CTMG,CTMB,ColorTableScale
+	make/o/n=256 CTMR,CTMG,CTMB,ColorTableScale
 	
-	make/o/n=(101,4) ColorTableMain
-	make/o/n=(101,10) ColorTableShow=(q<5) ? p : -1
-	SetScale/I x minscale,maxscale,"", ColorTableMain,ColorTableShow
-	ColorTableScale=p*(maxscale-minscale)/numpnts(ColorTableScale)+minscale
-	ColorTableLocation=max(min(ColorTableLocation,maxscale),minscale)
+	make/o/n=(256,4) ColorTableMain
+	make/o/n=(256,10) ColorTableShow=(q<5) ? p : -1
+	SetScale/I x 00,100,"", ColorTableMain,ColorTableShow
+	ColorTableScale=p*(100)/numpnts(ColorTableScale)
+	ColorTableLocation=max(min(ColorTableLocation,100),0)
 	sort ColorTableLocation,ColorTableLocation,ColorTableMainR,ColorTableMainG,ColorTableMainB,ColorTableMainAlpha
-	duplicate/o  interpolateCT(101,ColorTableMainR,ColorTableLocation), CTMR
-	duplicate/o  interpolateCT(101,ColorTableMainG,ColorTableLocation), CTMG
-	duplicate/o  interpolateCT(101,ColorTableMainB,ColorTableLocation), CTMB
-	duplicate/o  interpolateCT(101,ColorTableMainAlpha,ColorTableLocation), CTMALPHA
+	duplicate/o  interpolateCT(ColorTableMainR,ColorTableLocation), CTMR
+	duplicate/o  interpolateCT(ColorTableMainG,ColorTableLocation), CTMG
+	duplicate/o  interpolateCT(ColorTableMainB,ColorTableLocation), CTMB
+	duplicate/o  interpolateCT(ColorTableMainAlpha,ColorTableLocation), CTMALPHA
 	ColorTableMain[][0]=CTMR[p]
 	ColorTableMain[][1]=CTMG[p]
 	ColorTableMain[][2]=CTMB[p]
 	ColorTableMain[][3]=CTMALPHA[p]
 	updateColorTableSlider(0)
+	controlinfo/w=GraphControlCW ColortableUpdate3D_CT
+	if(v_value)
+		CopyToTableBTN("CopyTo3D_CT")
+	endif		
 	setdatafolder $DF
 end
 
 //helper function
 Function/S ColorValList()
 	string DF=getdatafolder(1)
-	setdatafolder root:colorwheel:
-	//nvar NumColors
+	setdatafolder root:GraphControl:colorwheel:
+	nvar NumColors
 	wave ColorTableLocation
 	string output=""
 	Variable i
@@ -350,13 +373,13 @@ end
 Function UpdateSelectedLocation(selLocation)
 	variable selLocation
 	string DF=getdatafolder(1)
-	setdatafolder root:colorwheel:
+	setdatafolder root:GraphControl:colorwheel:
 	nvar NumColors
 	wave ColorTableLocation	,ColorTableMainB,ColorTableMainG,ColorTableMainR,ColorTableMainAlpha
-	Slider ColorTableSlider1 value= LocationToPercent(ColorTableLocation[selLocation]),win=ColorWheelPanel
+	Slider ColorTableSlider1 value= ColorTableLocation[selLocation],win=GraphControlCW
 	updateColorTableSlider(0)
-	SetVariable ColorLocationSV value= _NUM:ColorTableLocation[selLocation],win=ColorWheelPanel
-	PopupMenu ColorLocationPM popColor=(ColorTableMainR[selLocation],ColorTableMainG[selLocation],ColorTableMainB[selLocation],ColorTableMainAlpha[selLocation]),win=ColorWheelPanel
+	SetVariable ColorLocationSV value= _NUM:ColorTableLocation[selLocation],win=GraphControlCW
+	PopupMenu ColorLocationPM popColor=(ColorTableMainR[selLocation],ColorTableMainG[selLocation],ColorTableMainB[selLocation],ColorTableMainAlpha[selLocation]),win=GraphControlCW
 	setdatafolder $DF
 end
 
@@ -374,15 +397,15 @@ Function ChangeCTLocation(ctrlName,varNum,varStr,varName) : SetVariableControl
 	String varName
 	variable selLocation
 	string DF=getdatafolder(1)
-	setdatafolder root:colorwheel:
-	nvar NumColors,maxscale,minscale
+	setdatafolder root:GraphControl:colorwheel:
+	nvar NumColors//,maxscale,minscale
 	wave ColorTableLocation
-	controlinfo /w =ColorWheelPanel ColorLocations
+	controlinfo /w =GraphControlCW ColorLocations
 	selLocation=v_value-1
 	ColorTableLocation[selLocation]=varnum
-	ColorTableLocation=max(min(ColorTableLocation,maxscale),minscale)
+	ColorTableLocation=max(min(ColorTableLocation,100),0)
 
-	Slider ColorTableSlider1 value= LocationToPercent(ColorTableLocation[selLocation]),win=ColorWheelPanel
+	Slider ColorTableSlider1 value= ColorTableLocation[selLocation],win=GraphControlCW
 	updateColorTableSlider(1)	
 	setdatafolder $DF
 End
@@ -392,12 +415,12 @@ Function SelectColorLocationPM(ctrlName,popNum,popStr) : PopupMenuControl
 	Variable popNum
 	String popStr
 	string DF=getdatafolder(1)
-	setdatafolder root:colorwheel:
+	setdatafolder root:GraphControl:colorwheel:
 	nvar NumColors
 	wave ColorTableLocation,ColorTableMainB,ColorTableMainG,ColorTableMainR	,ColorTableMainAlpha
-	controlinfo /w =ColorWheelPanel ColorLocations
+	controlinfo /w =GraphControlCW ColorLocations
 	variable selLocation=v_value-1
-	controlinfo /w =ColorWheelPanel ColorLocationPM
+	controlinfo /w =GraphControlCW ColorLocationPM
 	ColorTableMainR[selLocation]=v_red
 	ColorTableMainG[selLocation]=v_green
 	ColorTableMainB[selLocation]=v_blue
@@ -413,10 +436,10 @@ Function ScaleChanged(ctrlName,varNum,varStr,varName) : SetVariableControl
 	String varStr
 	String varName
 	string DF=getdatafolder(1)
-	setdatafolder root:colorwheel:
-	nvar minscale,maxscale
+	setdatafolder root:GraphControl:colorwheel:
+	//nvar minscale,maxscale
 	wave ColorTableLocation
-	ColorTableLocation=max(min(ColorTableLocation,maxscale),minscale)
+	ColorTableLocation=max(min(ColorTableLocation,100),0)
 	setdatafolder $DF
 	CalculateColorTable()
 	UpdateSelectedLocation(0)
@@ -427,14 +450,14 @@ Function UpdateColorTable(ctrlName,checked) : CheckBoxControl
 	String ctrlName
 	Variable checked	
 	if(stringmatch(ctrlName,"*Type*"))
-		CheckBox ColortableTypeColorWheel,value=0,win=ColorWheelPanel
-		CheckBox ColortableTypeTable,value=0,win=ColorWheelPanel
+		CheckBox ColortableTypeColorWheel,value=0,win=GraphControlCW
+		CheckBox ColortableTypeTable,value=0,win=GraphControlCW
 	else
-		CheckBox Colortableprimary,value=0,win=ColorWheelPanel
-		CheckBox ColortableBright,value=0,win=ColorWheelPanel
-		CheckBox ColortableDark,value=0,win=ColorWheelPanel
+		CheckBox Colortableprimary,value=0,win=GraphControlCW
+		CheckBox ColortableBright,value=0,win=GraphControlCW
+		CheckBox ColortableDark,value=0,win=GraphControlCW
 	endif
-	CheckBox $ctrlName,value=1,win=ColorWheelPanel
+	CheckBox $ctrlName,value=1,win=GraphControlCW
 	//CalculateColorTable()
 	drawCWshape()
 	//CopyToTable()
@@ -442,9 +465,18 @@ End
 
 Function CopyToTableBTN(ctrlName) : ButtonControl
 	String ctrlName
-	CopyToTable()
-	PopupMenu ColorLocations mode=1,win=ColorWheelPanel
-	UpdateSelectedLocation(0)
+	if(stringmatch(ctrlName,"CopyToTable"))
+		CopyToTable()
+		PopupMenu ColorLocations mode=1,win=GraphControlCW
+		UpdateSelectedLocation(0)
+	else
+		if(stringmatch(ctrlName,"CopyTo3D"))
+			setwindow GraphControlCW,userdata(Source3d)="CT"
+		else
+			setwindow GraphControlCW,userdata(Source3d)=""
+		endif
+		GC3d_Orthogonal()
+	endif
 End
 
 //the slider directs the nodes
@@ -462,9 +494,9 @@ End
 Function AddStop(ctrlName) : ButtonControl
 	String ctrlName
 	string DF=getdatafolder(1)
-	setdatafolder root:colorwheel:
+	setdatafolder root:GraphControl:colorwheel:
 	wave ColorTableLocation,ColorTableMainB,ColorTableMainG,ColorTableMainR,ColorTableMainAlpha
-	controlinfo /w =ColorWheelPanel ColorLocations
+	controlinfo /w =GraphControlCW ColorLocations
 	variable selLocation=v_value-1,leftlocation,r,g,b,newlocation,alpha
 	if(selLocation<numpnts(ColorTableLocation)-1)//insert new point between two existing points
 		leftlocation=selLocation
@@ -492,9 +524,9 @@ End
 Function SaveGradient(ctrlName) : ButtonControl
 	String ctrlName
 	string DF=getdatafolder(1)
-	controlinfo/w=ColorWheelPanel NumGradient
+	controlinfo/w=GraphControlCW NumGradient
 	variable selGradientNum=v_value
-	setdatafolder root:colorwheel:
+	setdatafolder root:GraphControl:colorwheel:
 	wave ColorTableLocation,ColorTableMainB,ColorTableMainG,ColorTableMainR,ColorTableMainAlpha
 	duplicate/o ColorTableLocation,$"ColorTableLocation_"+num2str(selGradientNum)
 	duplicate/o ColorTableMainB,$"ColorTableMainB_"+num2str(selGradientNum)
@@ -507,9 +539,9 @@ end
 Function LoadGradient(ctrlName) : ButtonControl
 	String ctrlName
 	string DF=getdatafolder(1)
-	controlinfo/w=ColorWheelPanel NumGradient
+	controlinfo/w=GraphControlCW NumGradient
 	variable selGradientNum=v_value
-	setdatafolder root:colorwheel:
+	setdatafolder root:GraphControl:colorwheel:
 	if(waveexists($"ColorTableLocation_"+num2str(selGradientNum)))
 		duplicate/o $"ColorTableLocation_"+num2str(selGradientNum),ColorTableLocation
 		duplicate/o $"ColorTableMainB_"+num2str(selGradientNum),ColorTableMainB
@@ -527,9 +559,9 @@ end
 Function Delstop(ctrlName) : ButtonControl
 	String ctrlName
 	string DF=getdatafolder(1)
-	setdatafolder root:colorwheel:
+	setdatafolder root:GraphControl:colorwheel:
 	wave ColorTableLocation,ColorTableMainB,ColorTableMainG,ColorTableMainR,ColorTableMainAlpha
-	controlinfo /w =ColorWheelPanel ColorLocations
+	controlinfo /w =GraphControlCW ColorLocations
 	variable selLocation=v_value-1
 	if(numpnts(ColorTableLocation)>2)//can delete a point
 		deletepoints selLocation,1,ColorTableLocation,ColorTableMainB,ColorTableMainG,ColorTableMainR,ColorTableMainAlpha
@@ -539,202 +571,406 @@ Function Delstop(ctrlName) : ButtonControl
 	CalculateColorTable()
 	selLocation=min(selLocation,numpnts(ColorTableLocation)-1)
 	//ColorValList()
-	PopupMenu ColorLocations mode=selLocation+1,win=ColorWheelPanel
+	PopupMenu ColorLocations mode=selLocation+1,win=GraphControlCW
 	UpdateSelectedLocation(selLocation)
 End
 
 Function Export(ctrlName) : ButtonControl
 	String ctrlName
 	string DF=getdatafolder(1)
-	setdatafolder root:colorwheel:
+	setdatafolder root:GraphControl:colorwheel:
 	wave ColorTableMain	
 	svar CWname
 	setdatafolder $DF
-	controlinfo/w=ColorWheelPanel NumPoints
-	variable ratio=dimsize(ColorTableMain,0)/v_value
-	make/o/n=(v_value,4) $CWname=ColorTableMain[p*ratio][q]
-	//duplicate/o ColorTableMain,$CWname
+	variable ratio=dimsize(ColorTableMain,0)/256
+	setdatafolder root:GraphControl:ColorTables
+	make/o/n=(256,4) $CWname=ColorTableMain[p*ratio][q]
+	GCcreateTransColorTables()
 End
 
 
-Window ColorWheelPanel() : Panel
-	PauseUpdate; Silent 1		// building window...
-	NewPanel /K=1 /W=(143,112,609,509)
-	ShowTools/A
-	GroupBox IndividualColorsGB,pos={166,2},size={290,100},title="Individual Colors"
-	SetVariable NumColors,pos={171,20},size={100,16},proc=DisplayIndividualColors,title="# Colors"
-	SetVariable NumColors,limits={1,6,1},value= root:ColorWheel:NumColors
-	SetVariable FirstColor,pos={171,40},size={100,16},proc=DisplayIndividualColors,title="First Color"
-	SetVariable FirstColor,limits={-1,12,1},value= root:ColorWheel:ColorMain
-	SetVariable AxisColor1,pos={171,80},size={100,16},proc=DisplayIndividualColors,title="Separation"
-	SetVariable AxisColor1,limits={1,5,1},value= root:ColorWheel:ColorSepAxis1
-	SetVariable Brightness,pos={171,60},size={100,16},proc=DisplayIndividualColors,title="Brightness"
-	SetVariable Brightness,limits={0,5,1},value= root:ColorWheel:ColorBrightness
-	PopupMenu ColorResult1,pos={279,17},size={50,21}
-	PopupMenu ColorResult1,mode=1,popColor= (65280,56832,5888),value= #"\"*COLORPOP*\""
-	PopupMenu ColorResult2,pos={279,37},size={50,21}
-	PopupMenu ColorResult2,mode=1,popColor= (60672,7168,9216),value= #"\"*COLORPOP*\""
-	PopupMenu ColorResult3,pos={279,57},size={50,21}
-	PopupMenu ColorResult3,mode=1,popColor= (8448,16384,39424),value= #"\"*COLORPOP*\""
-	PopupMenu ColorResult4,pos={279,77},size={50,21},disable=1
-	PopupMenu ColorResult4,mode=1,popColor= (0,41216,19200),value= #"\"*COLORPOP*\""
-	SetVariable ColorR1,pos={330,20},size={40,16},proc=DisplayIndividualColors
-	SetVariable ColorR1,limits={0,inf,0},value= _NUM:65280
-	SetVariable ColorG1,pos={370,20},size={40,16},proc=DisplayIndividualColors
-	SetVariable ColorG1,limits={0,inf,0},value= _NUM:56832//,styledText= 1
-	SetVariable ColorB1,pos={410,20},size={40,16},proc=DisplayIndividualColors
-	SetVariable ColorB1,limits={0,inf,0},value= _NUM:5888//,styledText= 1
-	SetVariable ColorR2,pos={330,40},size={40,16},proc=DisplayIndividualColors
-	SetVariable ColorR2,limits={0,inf,0},value= _NUM:60672//,styledText= 1
-	SetVariable ColorG2,pos={370,40},size={40,16},proc=DisplayIndividualColors
-	SetVariable ColorG2,limits={0,inf,0},value= _NUM:7168//,styledText= 1
-	SetVariable ColorB2,pos={410,40},size={40,16},proc=DisplayIndividualColors
-	SetVariable ColorB2,limits={0,inf,0},value= _NUM:9216//,styledText= 1
-	SetVariable ColorR3,pos={330,60},size={40,16},proc=DisplayIndividualColors
-	SetVariable ColorR3,limits={0,inf,0},value= _NUM:8448//,styledText= 1
-	SetVariable ColorG3,pos={370,60},size={40,16},proc=DisplayIndividualColors
-	SetVariable ColorG3,limits={0,inf,0},value= _NUM:16384//,styledText= 1
-	SetVariable ColorB3,pos={410,60},size={40,16},proc=DisplayIndividualColors
-	SetVariable ColorB3,limits={0,inf,0},value= _NUM:39424//,styledText= 1
-	SetVariable ColorR4,pos={330,80},size={40,16},disable=1,proc=DisplayIndividualColors
-	SetVariable ColorR4,limits={0,inf,0},value= _NUM:0//,styledText= 1
-	SetVariable ColorG4,pos={370,80},size={40,16},disable=1,proc=DisplayIndividualColors
-	SetVariable ColorG4,limits={0,inf,0},value= _NUM:41216//,styledText= 1
-	SetVariable ColorB4,pos={410,80},size={40,16},disable=1,proc=DisplayIndividualColors
-	SetVariable ColorB4,limits={0,inf,0},value= _NUM:19200//,styledText= 1
-	PopupMenu ColorResult5,pos={279,97},size={50,21},disable=1
-	PopupMenu ColorResult5,mode=1,popColor= (60672,7168,9216),value= #"\"*COLORPOP*\""
-	SetVariable ColorR5,pos={330,100},size={40,16},disable=1,proc=DisplayIndividualColors
-	SetVariable ColorR5,limits={0,inf,0},value= _NUM:60672//,styledText= 1
-	SetVariable ColorG5,pos={370,100},size={40,16},disable=1,proc=DisplayIndividualColors
-	SetVariable ColorG5,limits={0,inf,0},value= _NUM:7168//,styledText= 1
-	SetVariable ColorB5,pos={410,100},size={40,16},disable=1,proc=DisplayIndividualColors
-	SetVariable ColorB5,limits={0,inf,0},value= _NUM:9216//,styledText= 1
-	PopupMenu ColorResult6,pos={279,117},size={50,21},disable=1
-	PopupMenu ColorResult6,mode=1,popColor= (25856,11264,30976),value= #"\"*COLORPOP*\""
-	SetVariable ColorR6,pos={330,120},size={40,16},disable=1,proc=DisplayIndividualColors
-	SetVariable ColorR6,limits={0,inf,0},value= _NUM:25856//,styledText= 1
-	SetVariable ColorG6,pos={370,120},size={40,16},disable=1,proc=DisplayIndividualColors
-	SetVariable ColorG6,limits={0,inf,0},value= _NUM:11264//,styledText= 1
-	SetVariable ColorB6,pos={410,120},size={40,16},disable=1,proc=DisplayIndividualColors
-	SetVariable ColorB6,limits={0,inf,0},value= _NUM:30976//,styledText= 1
-	GroupBox ColorTables,pos={166,144},size={290,243},title="Color Table"
-	Slider ColorTableSlider1,pos={208,269},size={220,19},proc=ColorTableSlider
-	Slider ColorTableSlider1,labelBack=(65280,56832,5888)
-	Slider ColorTableSlider1,limits={0,101,1},value= 0,side= 2,vert= 0,ticks= 0
-	Button CopyToTable,pos={4,167},size={120,30},proc=CopyToTableBTN,title="Copy to Color Table"
-	CheckBox ColortableBright,pos={20,252},size={97,14},proc=UpdateColorTable,title="Add Bright Stops"
-	CheckBox ColortableBright,value= 0,mode=1
-	CheckBox ColortableUpdate,pos={5,201},size={53,14},title="Update"
-	CheckBox ColortableUpdate,variable= root:ColorWheel:tableupdate
-	CheckBox ColortableTypeTable,pos={173.00,105.00},size={44.00,15.00},proc=UpdateColorTable,title="Table"
-	CheckBox ColortableTypeTable,value= 0,mode=1
-	PopupMenu ColorTableMenu,pos={250.00,105.00},size={206.00,19.00},proc=CWColorTabelPopMenuProc,title=" "
-	PopupMenu ColorTableMenu,mode=49,value= #"\"*COLORTABLEPOP*\""
-	CheckBox ColortableTypeColorWheel,pos={173.00,125.00},size={81.00,15.00},proc=UpdateColorTable,title="Color Wheel"
-	CheckBox ColortableTypeColorWheel,value= 1,mode=1
+Function InitGraphControlCW()
+	String DF= GetDataFolder(1)
+	NewPanel /K=1 /W=(43,0,509,500)/n=GraphControlCW
+	GroupBox IndividualColorsGB,pos={166,2},size={290,100},title="Individual Colors",win=GraphControlCW
+	SetVariable NumColors,pos={171,20},size={100,16},proc=DisplayIndividualColors,title="# Colors",win=GraphControlCW
+	SetVariable NumColors,limits={1,4,1},value= root:GraphControl:colorwheel:NumColors,win=GraphControlCW
+	SetVariable FirstColor,pos={171,40},size={100,16},proc=DisplayIndividualColors,title="First Color",win=GraphControlCW
+	SetVariable FirstColor,limits={-1,12,1},value= root:GraphControl:colorwheel:ColorMain,win=GraphControlCW
+	SetVariable AxisColor1,pos={171,80},size={100,16},proc=DisplayIndividualColors,title="Separation",win=GraphControlCW
+	SetVariable AxisColor1,limits={1,5,1},value= root:GraphControl:colorwheel:ColorSepAxis1,win=GraphControlCW
+	SetVariable Brightness,pos={171,60},size={100,16},proc=DisplayIndividualColors,title="Brightness",win=GraphControlCW
+	SetVariable Brightness,limits={0,5,1},value= root:GraphControl:colorwheel:ColorBrightness,win=GraphControlCW
+	PopupMenu ColorResult1,pos={279,17},size={50,21},win=GraphControlCW
+	PopupMenu ColorResult1,mode=1,popColor= (65280,56832,5888),value= #"\"*COLORPOP*\"",win=GraphControlCW
+	PopupMenu ColorResult2,pos={279,37},size={50,21},win=GraphControlCW
+	PopupMenu ColorResult2,mode=1,popColor= (60672,7168,9216),value= #"\"*COLORPOP*\"",win=GraphControlCW
+	PopupMenu ColorResult3,pos={279,57},size={50,21},win=GraphControlCW
+	PopupMenu ColorResult3,mode=1,popColor= (8448,16384,39424),value= #"\"*COLORPOP*\"",win=GraphControlCW
+	PopupMenu ColorResult4,pos={279,77},size={50,21},disable=1,win=GraphControlCW
+	PopupMenu ColorResult4,mode=1,popColor= (0,floor(41216/256),floor(19200/256)),value= #"\"*COLORPOP*\"",win=GraphControlCW
+	SetVariable ColorR1,pos={330,20},size={40,16},proc=DisplayIndividualColors,win=GraphControlCW
+	SetVariable ColorR1,limits={0,inf,0},value= _NUM:floor(65280/256),win=GraphControlCW
+	SetVariable ColorG1,pos={370,20},size={40,16},proc=DisplayIndividualColors,win=GraphControlCW
+	SetVariable ColorG1,limits={0,inf,0},value= _NUM:floor(56832/256),win=GraphControlCW//,styledText= 1
+	SetVariable ColorB1,pos={410,20},size={40,16},proc=DisplayIndividualColors,win=GraphControlCW
+	SetVariable ColorB1,limits={0,inf,0},value= _NUM:floor(5888/256),win=GraphControlCW//,styledText= 1
+	SetVariable ColorR2,pos={330,40},size={40,16},proc=DisplayIndividualColors,win=GraphControlCW
+	SetVariable ColorR2,limits={0,inf,0},value= _NUM:floor(60672/256),win=GraphControlCW//,styledText= 1
+	SetVariable ColorG2,pos={370,40},size={40,16},proc=DisplayIndividualColors,win=GraphControlCW
+	SetVariable ColorG2,limits={0,inf,0},value= _NUM:floor(7168/256),win=GraphControlCW//,styledText= 1
+	SetVariable ColorB2,pos={410,40},size={40,16},proc=DisplayIndividualColors,win=GraphControlCW
+	SetVariable ColorB2,limits={0,inf,0},value= _NUM:floor(9216/256),win=GraphControlCW//,styledText= 1
+	SetVariable ColorR3,pos={330,60},size={40,16},proc=DisplayIndividualColors,win=GraphControlCW
+	SetVariable ColorR3,limits={0,inf,0},value= _NUM:floor(8448/256),win=GraphControlCW//,styledText= 1
+	SetVariable ColorG3,pos={370,60},size={40,16},proc=DisplayIndividualColors,win=GraphControlCW
+	SetVariable ColorG3,limits={0,inf,0},value= _NUM:floor(16384/256),win=GraphControlCW//,styledText= 1
+	SetVariable ColorB3,pos={410,60},size={40,16},proc=DisplayIndividualColors,win=GraphControlCW
+	SetVariable ColorB3,limits={0,inf,0},value= _NUM:floor(39424/256),win=GraphControlCW//,styledText= 1
+	SetVariable ColorR4,pos={330,80},size={40,16},disable=1,proc=DisplayIndividualColors,win=GraphControlCW
+	SetVariable ColorR4,limits={0,inf,0},value= _NUM:0,win=GraphControlCW//,styledText= 1
+	SetVariable ColorG4,pos={370,80},size={40,16},disable=1,proc=DisplayIndividualColors,win=GraphControlCW
+	SetVariable ColorG4,limits={0,inf,0},value= _NUM:floor(41216/256),win=GraphControlCW//,styledText= 1
+	SetVariable ColorB4,pos={410,80},size={40,16},disable=1,proc=DisplayIndividualColors,win=GraphControlCW
+	SetVariable ColorB4,limits={0,inf,0},value= _NUM:floor(19200/256),win=GraphControlCW//,styledText= 1
+//	PopupMenu ColorResult5,pos={279,97},size={50,21},disable=1,win=GraphControlCW
+//	PopupMenu ColorResult5,mode=1,popColor= (floor(60672/256),floor(7168/256),floor(9216/256)),value= #"\"*COLORPOP*\"",win=GraphControlCW
+//	SetVariable ColorR5,pos={330,100},size={40,16},disable=1,proc=DisplayIndividualColors,win=GraphControlCW
+//	SetVariable ColorR5,limits={0,inf,0},value= _NUM:floor(60672/256),win=GraphControlCW
+//	SetVariable ColorG5,pos={370,100},size={40,16},disable=1,proc=DisplayIndividualColors,win=GraphControlCW
+//	SetVariable ColorG5,limits={0,inf,0},value= _NUM:floor(7168/256),win=GraphControlCW
+//	SetVariable ColorB5,pos={410,100},size={40,16},disable=1,proc=DisplayIndividualColors,win=GraphControlCW
+//	SetVariable ColorB5,limits={0,inf,0},value= _NUM:floor(9216/256),win=GraphControlCW
+//	PopupMenu ColorResult6,pos={279,117},size={50,21},disable=1,win=GraphControlCW
+//	PopupMenu ColorResult6,mode=1,popColor= (floor(25856/256),floor(11264/256),floor(30976/256)),value= #"\"*COLORPOP*\"",win=GraphControlCW
+//	SetVariable ColorR6,pos={330,120},size={40,16},disable=1,proc=DisplayIndividualColors,win=GraphControlCW
+//	SetVariable ColorR6,limits={0,inf,0},value= _NUM:floor(25856/256),win=GraphControlCW
+//	SetVariable ColorG6,pos={370,120},size={40,16},disable=1,proc=DisplayIndividualColors,win=GraphControlCW
+//	SetVariable ColorG6,limits={0,inf,0},value= _NUM:floor(11264/256),win=GraphControlCW
+//	SetVariable ColorB6,pos={410,120},size={40,16},disable=1,proc=DisplayIndividualColors,win=GraphControlCW
+//	SetVariable ColorB6,limits={0,inf,0},value= _NUM:floor(30976),win=GraphControlCW
+	PopupMenu ColorTableMenu,pos={175,125},size={79.00,17.00},proc=CWColorTabelPopMenuProc,win=GraphControlCW
+	PopupMenu ColorTableMenu,mode=1,value= #"root:GraphControl:colortablelist",win=GraphControlCW
+
+	CheckBox ColortableTypeTable,pos={175,105},size={44.00,15.00},proc=UpdateColorTable,title="Table",win=GraphControlCW
+	CheckBox ColortableTypeTable,value= 0,mode=1,win=GraphControlCW
+	CheckBox ColortableTypeColorWheel,pos={380,105},size={81.00,15.00},proc=UpdateColorTable,title="Color Wheel",win=GraphControlCW
+	CheckBox ColortableTypeColorWheel,value= 1,mode=1,win=GraphControlCW
+
+	Button CopyToTable,pos={255,155},size={120,30},proc=CopyToTableBTN,title="Copy to Color Table",win=GraphControlCW
+	CheckBox ColortableUpdate,pos={380,162},size={53,14},title="Live update",win=GraphControlCW
+	Button CopyTo3D,pos={255.00,190.00},size={120.00,30.00},proc=CopyToTableBTN,title="Copy to 3D",win=GraphControlCW
+	CheckBox ColortableUpdate3D,pos={380.00,197.00},size={73.00,16.00},title="Live update",value= 1,win=GraphControlCW
+
+	//---resulting color table
+	variable positionY=144+80
+	GroupBox ColorTables,pos={166,positionY},size={290,274},title="Color Table",win=GraphControlCW
+	Slider ColorTableSlider1,pos={208,positionY+125},size={220,19},proc=ColorTableSlider,win=GraphControlCW
+	Slider ColorTableSlider1,labelBack=(floor(65280/256),floor(56832/256),floor(5888/256)),win=GraphControlCW
+	Slider ColorTableSlider1,limits={0,101,1},value= 0,side= 2,vert= 0,ticks= 0,win=GraphControlCW
+//	PopupMenu ColorTableMenu,pos={250.00,105.00},size={206.00,19.00},proc=CWColorTabelPopMenuProc,title=" "
+//	PopupMenu ColorTableMenu,mode=49,value= #"\"*COLORTABLEPOP*\""
+
 	
-	PopupMenu ColorLocations,pos={176,165},size={113,21},proc=ColorLocationSelect,title="Gradient Stop #"
-	PopupMenu ColorLocations,mode=1,popvalue="1",value= #"ColorValList()"
-	SetVariable ColorTableR,pos={175,215},size={60,16},proc=DisplayIndividualColors
-	SetVariable ColorTableR,limits={0,65535,255},value= _NUM:65280//,styledText= 1
-	SetVariable ColorTableG,pos={235,215},size={60,16},proc=DisplayIndividualColors
-	SetVariable ColorTableG,limits={0,65535,255},value= _NUM:56832//,styledText= 1
-	SetVariable ColorTableB,pos={295,215},size={60,16},proc=DisplayIndividualColors
-	SetVariable ColorTableB,limits={0,65535,255},value= _NUM:5888//,styledText= 1
-	SetVariable ColorTableAlpha,pos={365.00,215.00},size={80.00,18.00},proc=DisplayIndividualColors,title="α"
-	SetVariable ColorTableAlpha,limits={0,65535,255},value= _NUM:65535
+	PopupMenu ColorLocations,pos={176,positionY+19},size={113,21},proc=ColorLocationSelect,title="Gradient Stop #",win=GraphControlCW
+	PopupMenu ColorLocations,mode=1,popvalue="1",value= #"ColorValList()",win=GraphControlCW
+	SetVariable ColorTableR,pos={175,positionY+71},size={60,16},proc=DisplayIndividualColors,win=GraphControlCW
+	SetVariable ColorTableR,limits={0,255,1},value= _NUM:floor(65280/256),win=GraphControlCW
+	SetVariable ColorTableG,pos={235,positionY+71},size={60,16},proc=DisplayIndividualColors,win=GraphControlCW
+	SetVariable ColorTableG,limits={0,255,1},value= _NUM:floor(56832/256),win=GraphControlCW
+	SetVariable ColorTableB,pos={295,positionY+71},size={60,16},proc=DisplayIndividualColors,win=GraphControlCW
+	SetVariable ColorTableB,limits={0,255,1},value= _NUM:floor(5888/256),win=GraphControlCW
+	SetVariable ColorTableAlpha,pos={365,positionY+71},size={80.00,18.00},proc=DisplayIndividualColors,title="α",win=GraphControlCW
+	SetVariable ColorTableAlpha,limits={0,255,1},value= _NUM:256,win=GraphControlCW
 
-	SetVariable ColorLocationSV,pos={231,194},size={90,16},proc=ChangeCTLocation,title="Position"
-	SetVariable ColorLocationSV,value= _NUM:0
-	PopupMenu ColorLocationPM,pos={175,191},size={50,21},proc=SelectColorLocationPM
-	PopupMenu ColorLocationPM,mode=1,popColor= (65280,56832,5888),value= #"\"*COLORPOP*\""
-	SetVariable MinScale,pos={171,313},size={70,16},proc=ScaleChanged,title="Min:"
-	SetVariable MinScale,value= root:ColorWheel:minscale
-	SetVariable MaxScale,pos={380,313},size={70,16},proc=ScaleChanged,title="Max:"
-	SetVariable MaxScale,value= root:ColorWheel:maxscale
-	Button AddGradientStop,pos={367,164},size={32,32},proc=AddStop,title="Add"
-	Button RemoveGradientStop,pos={407,164},size={32,32},proc=Delstop,title="Del"
-	CheckBox Colortableprimary,pos={20,232},size={108,14},proc=UpdateColorTable,title="Primary Colors Only"
-	CheckBox Colortableprimary,value= 1,mode=1
-	CheckBox ColortableDark,pos={20,272},size={93,14},proc=UpdateColorTable,title="Add Dark Stops"
-	CheckBox ColortableDark,value= 0,mode=1
-	Button Export,pos={172,349},size={60,30},proc=Export,title="Export"
-	SetVariable ColorTableName,pos={235,357},size={214,16},noproc,title="Name:"
-	SetVariable ColorTableName,limits={0,inf,0},value= root:ColorWheel:CWname
-	Button SaveGradient,pos={5.00,330.00},size={50.00,32.00},proc=SaveGradient,title="Save"
-	SetVariable NumGradient,pos={10.00,310.00},size={100.00,18.00},title="Gradient #"
-	SetVariable NumGradient,limits={1,inf,1},value= _NUM:1
-	Button LoadGradient,pos={65.00,330.00},size={50.00,32.00},proc=LoadGradient,title="Load"
+	SetVariable ColorLocationSV,pos={231,positionY+50},size={90,16},proc=ChangeCTLocation,title="Position",win=GraphControlCW
+	SetVariable ColorLocationSV,value= _NUM:0,win=GraphControlCW
+	PopupMenu ColorLocationPM,pos={175,positionY+47},size={50,21},proc=SelectColorLocationPM,win=GraphControlCW
+	PopupMenu ColorLocationPM,mode=1,popColor= (65280,56832,5888),value= #"\"*COLORPOP*\"",win=GraphControlCW
+//	SetVariable MinScale,pos={171,313},size={70,16},proc=ScaleChanged,title="Min:"
+//	SetVariable MinScale,value= root:GraphControl:colorwheel:minscale
+//	SetVariable MaxScale,pos={380,313},size={70,16},proc=ScaleChanged,title="Max:"
+//	SetVariable MaxScale,value= root:GraphControl:colorwheel:maxscale
+	Button AddGradientStop,pos={367,positionY+20},size={32,32},proc=AddStop,title="Add",win=GraphControlCW
+	Button RemoveGradientStop,pos={407,positionY+20},size={32,32},proc=Delstop,title="Del",win=GraphControlCW
+	CheckBox Colortableprimary,pos={180,positionY+96},size={108,14},proc=UpdateColorTable,title="Primary Only",win=GraphControlCW
+	CheckBox Colortableprimary,value= 1,mode=1,win=GraphControlCW
+	CheckBox ColortableBright,pos={280,positionY+96},size={97,14},proc=UpdateColorTable,title="+ Bright",win=GraphControlCW
+	CheckBox ColortableBright,value= 0,mode=1,win=GraphControlCW
+	CheckBox ColortableDark,pos={360,positionY+96},size={93,14},proc=UpdateColorTable,title="+ Dark",win=GraphControlCW
+	CheckBox ColortableDark,value= 0,mode=1,win=GraphControlCW
+	Button Export,pos={172,positionY+205},size={60,30},proc=Export,title="Export",win=GraphControlCW
+	SetVariable ColorTableName,pos={235,positionY+213},size={214,16},noproc,title="Name:",win=GraphControlCW
+	SetVariable ColorTableName,limits={0,inf,0},value= root:GraphControl:colorwheel:CWname,win=GraphControlCW
+	Button SaveGradient,pos={290,positionY+171},size={50.00,32.00},proc=SaveGradient,title="Save",win=GraphControlCW
+	SetVariable NumGradient,pos={180,positionY+176},size={100.00,18.00},title="Gradient #",win=GraphControlCW
+	SetVariable NumGradient,limits={1,inf,1},value= _NUM:1,win=GraphControlCW
+	Button LoadGradient,pos={350,positionY+171},size={50.00,32.00},proc=LoadGradient,title="Load",win=GraphControlCW
+	Button CopyTo3D_CT,pos={172.00,462.00},size={120.00,30.00},proc=CopyToTableBTN,title="Copy to 3D",win=GraphControlCW
+	CheckBox ColortableUpdate3D_CT,pos={297.00,469.00},size={73.00,16.00},title="Live update",value= 0,win=GraphControlCW
 
-	SetVariable NumPoints,pos={250.00,335.00},size={150.00,18.00},proc=ScaleChanged,title="Number of points:"
-	SetVariable NumPoints,format="%d",limits={1,inf,1},value= _NUM:100
-
-	String fldrSav0= GetDataFolder(1)
-	SetDataFolder root:ColorWheel:
-	Display/W=(0,0,160,160)/HOST=#  CWschemeY0 vs CWschemeX0
-	AppendToGraph CWschemeY1 vs CWschemeX1
-	AppendToGraph CWschemeY2 vs CWschemeX2
-	AppendToGraph CWschemeY3 vs CWschemeX3
-	AppendToGraph CWschemeY4 vs CWschemeX4
-	AppendToGraph CWschemeY5 vs CWschemeX5
-	AppendToGraph CWschemeY6 vs CWschemeX6
-	AppendToGraph CWschemeY7 vs CWschemeX7
-	AppendToGraph CWschemeY8 vs CWschemeX8
-	AppendToGraph CWschemeY9 vs CWschemeX9
-	AppendToGraph CWschemeY10 vs CWschemeX10
-	AppendToGraph CWschemeY11 vs CWschemeX11
-	AppendToGraph color_selection_drawY vs color_selection_drawX
-	SetDataFolder fldrSav0
-	ModifyGraph margin(left)=20,margin(bottom)=20,margin(top)=20,margin(right)=20,width=120
-	ModifyGraph height=120
-	ModifyGraph mode=4
-	ModifyGraph marker(CWschemeY0)=19,marker(CWschemeY1)=19,marker(CWschemeY2)=19,marker(CWschemeY3)=19
-	ModifyGraph marker(CWschemeY4)=19,marker(CWschemeY5)=19,marker(CWschemeY6)=19,marker(CWschemeY7)=19
-	ModifyGraph marker(CWschemeY8)=19,marker(CWschemeY9)=19,marker(CWschemeY10)=19,marker(CWschemeY11)=19
-	ModifyGraph marker(color_selection_drawY)=41
-	ModifyGraph lStyle(color_selection_drawY)=2
-	ModifyGraph rgb(color_selection_drawY)=(65280,0,0)
-	ModifyGraph msize(CWschemeY0)=4,msize(CWschemeY1)=4,msize(CWschemeY2)=4,msize(CWschemeY3)=4
-	ModifyGraph msize(CWschemeY4)=4,msize(CWschemeY5)=4,msize(CWschemeY6)=4,msize(CWschemeY7)=4
-	ModifyGraph msize(CWschemeY8)=4,msize(CWschemeY9)=4,msize(CWschemeY10)=4,msize(CWschemeY11)=4
-	ModifyGraph msize(color_selection_drawY)=6
-	ModifyGraph zColor(CWschemeY0)={:ColorWheel:color_yellow,*,*,directRGB},zColor(CWschemeY1)={:ColorWheel:color_yellow_orange,*,*,directRGB}
-	ModifyGraph zColor(CWschemeY2)={:ColorWheel:color_orange,*,*,directRGB},zColor(CWschemeY3)={:ColorWheel:color_red_orange,*,*,directRGB}
-	ModifyGraph zColor(CWschemeY4)={:ColorWheel:color_red,*,*,directRGB},zColor(CWschemeY5)={:ColorWheel:color_red_purple,*,*,directRGB}
-	ModifyGraph zColor(CWschemeY6)={:ColorWheel:color_purple,*,*,directRGB},zColor(CWschemeY7)={:ColorWheel:color_blue_purple,*,*,directRGB}
-	ModifyGraph zColor(CWschemeY8)={:ColorWheel:color_blue,*,*,directRGB},zColor(CWschemeY9)={:ColorWheel:color_blue_green,*,*,directRGB}
-	ModifyGraph zColor(CWschemeY10)={:ColorWheel:color_green,*,*,directRGB},zColor(CWschemeY11)={:ColorWheel:color_yellow_green,*,*,directRGB}
-	ModifyGraph marker(color_selection_drawY[0])=1
-	ModifyGraph nticks=0
-	ModifyGraph axThick=0
-	RenameWindow #,ColorWheelPlot
-	SetActiveSubwindow ##
-	String fldrSav1= GetDataFolder(1)
-	SetDataFolder root:ColorWheel:
-	display/W=(207,289,427,304)/HOST=#  
-	appendImage ColorTableShow
-	AppendToGraph ColorTableLocX vs ColorTableLocation
-	AppendToGraph ColorTableLocX vs ColorTableLocation
-	SetDataFolder fldrSav1
-	ModifyGraph margin(left)=10,margin(bottom)=-1,margin(top)=-1,margin(right)=10,width=200
-	ModifyGraph height=15
-	ModifyGraph mode(ColorTableLocX)=3,marker(ColorTableLocX)=23
-	ModifyGraph mode(ColorTableLocX#1)=3,marker(ColorTableLocX#1)=10,msize(ColorTableLocX#1)=3,rgb(ColorTableLocX#1)=(65535,65535,65535)
-	//ModifyGraph marker(ColorTableShow)=16
-	//ModifyGraph lSize(ColorTableShow)=10
-	ModifyGraph msize(ColorTableLocX)=5
-	ModifyGraph useMrkStrokeRGB(ColorTableLocX)=1
-	ModifyImage ColorTableShow cindex= :ColorWheel:ColorTableMain,minRGB=NaN,maxRGB=0
+	//---3d controls
+	SetVariable Color3D_position,pos={10.00,325.00},size={90.00,19.00},proc=CW_3dColor_SetVarProc,title="Position",win=GraphControlCW
+	SetVariable Color3D_position,limits={0,100,1},value= _NUM:50,win=GraphControlCW
+	SetVariable Color3D_distance,pos={10.00,375.00},size={90.00,19.00},proc=CW_3dColor_SetVarProc,title="Distance",win=GraphControlCW
+	SetVariable Color3D_distance,limits={0,inf,1},value= _NUM:50,win=GraphControlCW
+	CheckBox Color3D_Orthogonal,pos={5.00,357.00},size={73.00,16.00},proc=CW_3dColor_CheckProc,title="Orthogonal",win=GraphControlCW
+	CheckBox Color3D_Orthogonal,value= 1,win=GraphControlCW
+	CheckBox Color3D_Negative,pos={5.00,427.00},size={59.00,16.00},proc=CW_3dColor_CheckProc,title="Negative",win=GraphControlCW
+	CheckBox Color3D_Negative,value= 1,win=GraphControlCW
+	CheckBox Color3D_NegativeLine,pos={5.00,457.00},size={84.00,16.00},proc=CW_3dColor_CheckProc,title="Negative Line",win=GraphControlCW
+	CheckBox Color3D_NegativeLine,value= 1,win=GraphControlCW
+	SetVariable Color3D_NegPos,pos={10.00,475.00},size={90.00,19.00},proc=CW_3dColor_SetVarProc,title="Position",win=GraphControlCW
+	SetVariable Color3D_NegPos,limits={0,100,10},value= _NUM:50,win=GraphControlCW
+	ValDisplay Color3d_NegLineCol,pos={110.00,458.00},size={50.00,14.00},frame=2,win=GraphControlCW
+	ValDisplay Color3d_NegLineCol,limits={0,1,0},barmisc={0,0},mode= 2,zeroColor= (32768,32768,32768),win=GraphControlCW
+	ValDisplay Color3d_NegLineCol,value= #"0",win=GraphControlCW
+	ValDisplay Color3d_NegCol,pos={110.00,428.00},size={50.00,14.00},frame=2,win=GraphControlCW
+	ValDisplay Color3d_NegCol,limits={0,1,0},barmisc={0,0},mode= 2,zeroColor= (39424,20480,14336),win=GraphControlCW
+	ValDisplay Color3d_NegCol,value= #"0",win=GraphControlCW
+	ValDisplay Color3d_PositionCol,pos={110.00,328.00},size={50.00,14.00},frame=2,win=GraphControlCW
+	ValDisplay Color3d_PositionCol,limits={0,1,0},barmisc={0,0},mode= 2,zeroColor= (26112,45056,51200),win=GraphControlCW
+	ValDisplay Color3d_PositionCol,value= #"0",win=GraphControlCW
+	SetVariable Color3D_Angle,pos={10.00,395.00},size={90.00,19.00},proc=CW_3dColor_SetVarProc,title="Angle",win=GraphControlCW
+	SetVariable Color3D_Angle,limits={0,330,30},value= _NUM:0,win=GraphControlCW
+	ValDisplay Color3d_OrthoCol,pos={110.00,358.00},size={50.00,14.00},frame=2,win=GraphControlCW
+	ValDisplay Color3d_OrthoCol,limits={0,1,0},barmisc={0,0},mode= 2,zeroColor= (24245,34268,44919),win=GraphControlCW
+	ValDisplay Color3d_OrthoCol,value= #"0",win=GraphControlCW
 	
-	//ModifyGraph zColor(ColorTableShow)={:ColorWheel:ColorTableScale,*,*,cindexRGB,0,:ColorWheel:ColorTableMain}
-	ModifyGraph zColor(ColorTableLocX)={:ColorWheel:ColorTableLocation,*,*,cindexRGB,0,:ColorWheel:ColorTableMain}
-	ModifyGraph nticks=0
-	ModifyGraph axThick=0
-	RenameWindow #,ColorTableScale
-	SetActiveSubwindow ##
-	 CopyToTableBTN("")
+//	SetVariable NumPoints,pos={250.00,335.00},size={150.00,18.00},proc=ScaleChanged,title="Number of points:"
+//	SetVariable NumPoints,format="%d",limits={1,inf,1},value= _NUM:100
+	//---end variables
+	
+	//---color wheel plot
+	SetDataFolder root:GraphControl:colorwheel:
+	wave color_selection_drawY,color_selection_drawX,ColorTableShow
+	wave ColorTableLocX,ColorTableLocation
+	Display/W=(0,0,160,160)/HOST=GraphControlCW/n=ColorWheelPlot
+	variable i
+	for(i=0;i<12;i++)
+		AppendToGraph/w=GraphControlCW#ColorWheelPlot $"CWschemeY"+num2str(i) vs $"CWschemeX"+num2str(i)
+	endfor
+
+	AppendToGraph/w=GraphControlCW#ColorWheelPlot color_selection_drawY vs color_selection_drawX
+	ModifyGraph/w=GraphControlCW#ColorWheelPlot margin(left)=20,margin(bottom)=20,margin(top)=20,margin(right)=20,width=120,height=120,mode=4
+
+	ModifyGraph/w=GraphControlCW#ColorWheelPlot marker=19,nticks=0,axThick=0
+	ModifyGraph/w=GraphControlCW#ColorWheelPlot marker(color_selection_drawY)=41
+	ModifyGraph/w=GraphControlCW#ColorWheelPlot lStyle(color_selection_drawY)=2
+	ModifyGraph/w=GraphControlCW#ColorWheelPlot rgb(color_selection_drawY)=(65535,0,0)
+	ModifyGraph/w=GraphControlCW#ColorWheelPlot msize=4
+	ModifyGraph/w=GraphControlCW#ColorWheelPlot msize(color_selection_drawY)=6
+	ModifyGraph/w=GraphControlCW#ColorWheelPlot zColor(CWschemeY0)={root:GraphControl::ColorWheel:color_yellow,*,*,directRGB},zColor(CWschemeY1)={root:GraphControl::ColorWheel:color_yellow_orange,*,*,directRGB}
+	ModifyGraph/w=GraphControlCW#ColorWheelPlot zColor(CWschemeY2)={root:GraphControl::ColorWheel:color_orange,*,*,directRGB},zColor(CWschemeY3)={root:GraphControl::ColorWheel:color_red_orange,*,*,directRGB}
+	ModifyGraph/w=GraphControlCW#ColorWheelPlot zColor(CWschemeY4)={root:GraphControl::ColorWheel:color_red,*,*,directRGB},zColor(CWschemeY5)={root:GraphControl::ColorWheel:color_red_purple,*,*,directRGB}
+	ModifyGraph/w=GraphControlCW#ColorWheelPlot zColor(CWschemeY6)={root:GraphControl::ColorWheel:color_purple,*,*,directRGB},zColor(CWschemeY7)={root:GraphControl::ColorWheel:color_blue_purple,*,*,directRGB}
+	ModifyGraph/w=GraphControlCW#ColorWheelPlot zColor(CWschemeY8)={root:GraphControl::ColorWheel:color_blue,*,*,directRGB},zColor(CWschemeY9)={root:GraphControl::ColorWheel:color_blue_green,*,*,directRGB}
+	ModifyGraph/w=GraphControlCW#ColorWheelPlot zColor(CWschemeY10)={root:GraphControl::ColorWheel:color_green,*,*,directRGB},zColor(CWschemeY11)={root:GraphControl::ColorWheel:color_yellow_green,*,*,directRGB}
+	ModifyGraph/w=GraphControlCW#ColorWheelPlot marker(color_selection_drawY[0])=1
+
+	//---color table scale
+	display/W=(207,positionY+145,427,positionY+165)/HOST=GraphControlCW /n=ColorTableScale 
+	appendImage/w=GraphControlCW#ColorTableScale ColorTableShow
+	AppendToGraph/w=GraphControlCW#ColorTableScale ColorTableLocX vs ColorTableLocation
+	AppendToGraph/w=GraphControlCW#ColorTableScale ColorTableLocX vs ColorTableLocation
+	ModifyGraph/w=GraphControlCW#ColorTableScale margin(left)=10,margin(bottom)=-1,margin(top)=-1,margin(right)=10,width=200,height=15,nticks=0,axThick=0
+	ModifyGraph/w=GraphControlCW#ColorTableScale mode(ColorTableLocX)=3,marker(ColorTableLocX)=23
+	ModifyGraph/w=GraphControlCW#ColorTableScale mode(ColorTableLocX#1)=3,marker(ColorTableLocX#1)=10,msize(ColorTableLocX#1)=3,rgb(ColorTableLocX#1)=(65535,65535,65535)
+	ModifyGraph/w=GraphControlCW#ColorTableScale msize(ColorTableLocX)=5
+	ModifyGraph/w=GraphControlCW#ColorTableScale useMrkStrokeRGB(ColorTableLocX)=1
+	ModifyImage/w=GraphControlCW#ColorTableScale ColorTableShow ctab= {0,*,root:GraphControl:ColorWheel:ColorTableMain,0}	,minRGB=NaN,maxRGB=0
+	ModifyGraph/w=GraphControlCW#ColorTableScale zColor(ColorTableLocX)={root:GraphControl:ColorWheel:ColorTableLocation,*,*,cindexRGB,0,root:GraphControl:ColorWheel:ColorTableMain}
+   //---color table displays
+   newimage/host=GraphControlCW /n=ColorTableDisplay root:GraphControl:ColorTableShowWave
+   movesubwindow/w=GraphControlCW#ColorTableDisplay fnum=(235,105,365,125)
+    controlinfo/w=GraphControlCW ColorTableMenu
+	ModifyImage/w=GraphControlCW#ColorTableDisplay ColorTableShowWave ctab= {0,255,root:GraphControl:ColorTables:$(s_value),0}
+	ModifyGraph/w=GraphControlCW#ColorTableDisplay margin=5, nticks=0,axThick=0
+	setwindow GraphControlCW hook(click)=ColorTableClickHook
+	setwindow GraphControlCW activeChildFrame=0
+	//---3d color-------------
+	newgizmo/host=GraphControlCW /n=GizmoColor3D/w=(0,162,161,161+160)
+//	movesubwindow /w=GraphControlCW#GizmoColor3D fnum=(0,162,161,400)
+	GC3d_Orthogonal()
+	//---axes
+	AppendToGizmo /n=GraphControlCW#GizmoColor3D Axes=BoxAxes,name=axesBox
+	for(i=0;i<12;i++)
+		ModifyGizmo /n=GraphControlCW#GizmoColor3D ModifyObject=axesBox,objectType=Axes,property={ i,axisColor,1,0,0,1}
+	endfor
+	for(i=2;i<=5;i++)
+		ModifyGizmo /n=GraphControlCW#GizmoColor3D ModifyObject=axesBox,objectType=Axes,property={ i,axisColor,0,0,1,1}
+	endfor
+	for(i=6;i<=8;i++)
+		ModifyGizmo /n=GraphControlCW#GizmoColor3D ModifyObject=axesBox,objectType=Axes,property={ i,axisColor,0,1,0,1}
+	endfor
+	ModifyGizmo /n=GraphControlCW#GizmoColor3D ModifyObject=axesBox,objectType=Axes,property={ 1,axisColor,0,1,0,1}
+	ModifyGizmo /n=GraphControlCW#GizmoColor3D resumeUpdates
+	//---color scale scatter
+	AppendToGizmo/n=GraphControlCW#GizmoColor3D  Scatter=root:GraphControl:Color3d,name=scatterCT
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D  ModifyObject=scatterCT,objectType=scatter,property={ scatterColorType,1}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D  ModifyObject=scatterCT,objectType=scatter,property={ markerType,0}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D  ModifyObject=scatterCT,objectType=scatter,property={ sizeType,0}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D  ModifyObject=scatterCT,objectType=scatter,property={ rotationType,0}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D  ModifyObject=scatterCT,objectType=scatter,property={ Shape,2}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D  ModifyObject=scatterCT,objectType=scatter,property={ size,.5}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D  ModifyObject=scatterCT,objectType=scatter,property={ colorWave,root:GraphControl:Color3dCol}
+	//---orthogonal space
+	AppendToGizmo/n=GraphControlCW#GizmoColor3D Scatter=root:GraphControl:Ortho3d,name=scatterOrthogonal
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterOrthogonal,objectType=scatter,property={ scatterColorType,1}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterOrthogonal,objectType=scatter,property={ markerType,0}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterOrthogonal,objectType=scatter,property={ sizeType,0}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterOrthogonal,objectType=scatter,property={ rotationType,0}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterOrthogonal,objectType=scatter,property={ Shape,2}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterOrthogonal,objectType=scatter,property={ size,01}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterOrthogonal,objectType=scatter,property={ colorWave,root:GraphControl:Ortho3dCol}
+	//---negative (opposite color)
+	AppendToGizmo/n=GraphControlCW#GizmoColor3D Scatter=root:GraphControl:Neg3D,name=scatterNegative
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterNegative,objectType=scatter,property={ scatterColorType,1}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterNegative,objectType=scatter,property={ markerType,0}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterNegative,objectType=scatter,property={ sizeType,0}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterNegative,objectType=scatter,property={ rotationType,0}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterNegative,objectType=scatter,property={ Shape,2}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterNegative,objectType=scatter,property={ size,0.5}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterNegative,objectType=scatter,property={ colorWave,root:GraphControl:Neg3DCol}
+	//---line to negative
+	AppendToGizmo/n=GraphControlCW#GizmoColor3D Scatter=root:GraphControl:Neg3dLine,name=scatterNegativeLine
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterNegativeLine,objectType=scatter,property={ scatterColorType,1}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterNegativeLine,objectType=scatter,property={ markerType,0}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterNegativeLine,objectType=scatter,property={ sizeType,0}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterNegativeLine,objectType=scatter,property={ rotationType,0}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterNegativeLine,objectType=scatter,property={ Shape,2}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterNegativeLine,objectType=scatter,property={ size,0.5}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D ModifyObject=scatterNegativeLine,objectType=scatter,property={ colorWave,root:GraphControl:Neg3dLineCol}
+	//---display the objects
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D  setDisplayList=0, object=scatterCT
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D  setDisplayList=1, object=scatterOrthogonal
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D  setDisplayList=2, object=scatterNegative
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D  setDisplayList=3, object=scatterNegativeLine
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D  setDisplayList=4, object=axesBox
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D currentGroupObject=""
+	ModifyGizmo /n=GraphControlCW#GizmoColor3D setOuterBox={0,255,0,255,0,255}
+	ModifyGizmo/n=GraphControlCW#GizmoColor3D scalingOption=0
+   execute/p/q "CopyToTableBTN(\"CopyToTable\")"
+   execute/p/q "CopyToTableBTN(\"CopyTo3D_CT\")"
+   
+	SetDataFolder $DF
+   
 EndMacro
+
+Function CW_3dColor_CheckProc(ctrlName,checked) : CheckBoxControl
+	String ctrlName
+	Variable checked
+	GC3d_Orthogonal()
+End
+
+Function CW_3dColor_SetVarProc(ctrlName,varNum,varStr,varName) : SetVariableControl
+	String ctrlName
+	Variable varNum
+	String varStr
+	String varName
+	GC3d_Orthogonal()
+End
+
+
+//---create the 3d representaiton of colortables
+Function GC3d_Orthogonal()
+	dowindow GraphControlCW
+	if(v_flag)
+		controlinfo/w=GraphControlCW Color3D_position
+		variable point=max(1,v_value/100*256)
+		controlinfo/w=GraphControlCW Color3D_distance
+		variable dist=v_value
+		controlinfo/w=GraphControlCW Color3D_orthogonal
+		variable doOrth=v_value
+		controlinfo/w=GraphControlCW Color3D_negative
+		variable doNeg=v_value
+		controlinfo/w=GraphControlCW Color3D_negativeLine
+		variable doNegLine=v_value
+
+		string DF=getdatafolder(1)
+		setdatafolder root:graphcontrol:ColorWheel
+		wave colorTableMain
+		setdatafolder root:graphcontrol:	
+		variable CT=stringmatch(getuserdata("GraphControlCW","","Source3d"),"CT")
+		if(CT)
+			controlinfo/w=GraphControlCW ColorTableMenu 
+			wave M_colors=root:graphcontrol:colortables:$s_value
+			make/o/n=(256,3) color3d=M_colors[p][q]/256
+		else
+			make/o/n=(256,3) color3d=colortablemain[p][q]/256
+		endif
+		make/o/n=(256,4) Color3dCol=1
+		Color3dCol[][0,2]=Color3d[p][q]/256
+		make/o/n=(3) ColVec=Color3d[point][p]-Color3d[point-1][p]
+		make/o/n=(1,3) Ortho3d=0
+		//---orthogonal circle
+		if(doOrth)
+			variable angle1=atan2(ColVec[1],ColVec[0])
+			variable angle2=atan2(ColVec[2],sqrt(ColVec[1]^2+ColVec[0]^2))
+			
+			variable i
+			make/o/n=3/free VecN1=0,VecN2
+			VecN1[0]=-sin(angle1)*cos(angle2)
+			VecN1[1]=cos(angle1)*cos(angle2)
+			VecN1[2]=0//abs(cos(angle2))<0.1
+			
+			VecN2[0]=-cos(angle1)*sin(angle2)
+			VecN2[1]=-sin(angle1)*sin(angle2)
+			VecN2[2]=cos(angle2)
+
+//			print angle1,angle2,VecN1,VecN2,ColVec
+			if(sqrt(VecN1[0]^2+VecN1[1]^2)<0.1)	//---zero vector
+				VecN1[0]=VecN2[1]
+				VecN1[1]=VecN2[0]
+			endif
+			for(i=0;i<360;i+=30)
+				insertpoints 0,1,Ortho3d
+				Ortho3d[0][] = dist*( cos(i/180*PI)*(VecN1[q])+sin(i/180*PI)*(VecN2[q]) )
+
+			endfor		
+		endif
+		ValDisplay Color3d_PositionCol zeroColor= (min(65535,Color3d[point][0]*256),min(65535,Color3d[point][1]*256),min(65535,Color3d[point][2]*256)),win=GraphControlCW
+
+		Ortho3d+=Color3d[point][q]
+		if(doOrth)
+			controlinfo/w=GraphControlCW Color3D_Angle
+			variable angle=v_value/30
+			ValDisplay Color3d_OrthoCol zeroColor= (min(65535,Ortho3d[angle][0]*256),min(65535,Ortho3d[angle][1]*256),min(65535,Ortho3d[angle][2]*256)),win=GraphControlCW
+		else
+			ValDisplay Color3d_OrthoCol zeroColor= (61166,61166,61166),win=GraphControlCW
+		endif
+		//---negative
+		make/o/n=(256,3) Neg3D=256-Color3d[p][q]
+		make/o/n=(256,4) Neg3DCol=1
+		Neg3DCol[][0,2]=Neg3D/256
+		
+		//---negative line
+		if(doNegLine)
+			make/o/n=(10,3) Neg3dLine=Color3d[point][q]*p/10+Neg3D[point][q]*(10-p)/10
+			make/o/n=(10,4) Neg3dLineCol=1
+			Neg3dLineCol[][0,2]=Neg3dLine/256
+			controlinfo/w=GraphControlCW Color3D_negPos
+			insertpoints 0,1,Ortho3d
+			Ortho3d[0][]=Neg3dLine[v_value/100*9][q]
+			//---update the display
+			ValDisplay Color3d_NegLineCol zeroColor= (min(65535,Ortho3d[0][0]*256),min(65535,Ortho3d[0][1]*256),min(65535,Ortho3d[0][2]*256)),win=GraphControlCW
+		else
+			Neg3dLine=nan
+			ValDisplay Color3d_NegLineCol zeroColor= (61166,61166,61166),win=GraphControlCW
+		endif
+		if(doNeg)
+			insertpoints 0,1,Ortho3d
+			Ortho3d[0][]=Neg3D[point][q]
+			ValDisplay Color3d_NegCol zeroColor= (min(65535,Ortho3d[0][0]*256),min(65535,Ortho3d[0][1]*256),min(65535,Ortho3d[0][2]*256)),win=GraphControlCW
+		else
+			Neg3D=nan
+			ValDisplay Color3d_NegCol zeroColor= (61166,61166,61166),win=GraphControlCW
+		endif
+		make/o/n=(dimsize(Ortho3d,0),4) Ortho3dCol=1
+		Ortho3dCol[][0,2]=Ortho3d[p][q]/256
+		setdatafolder DF
+	endif
+end
 
 //used to save all the waves and variables in a data folder
 Function DataFolderList()
@@ -827,11 +1063,11 @@ function RecreateWaves()
   make/o /n=(6,0) CWschemeY10={3.0001,2.5001,2,1.5,1,0.50001}
   make/o /n=(6,0) CWschemeX11={2.9999,2.4999,2,1.5,0.99998,0.49999}
   make/o /n=(6,0) CWschemeY11={5.1962,4.3302,3.4641,2.5981,1.7321,0.86603}  
-  make/o/n=(101,10) ColorTableShow=(q<5) ? p : -1
+  make/o/n=(256,10) ColorTableShow=(q<5) ? p : -1
   make/o /n=(3,0) ColorTableLocX={5,5,5}
   make/o /n=(3,0) ColorTableLocation={0,50,100}
-  make/o /n=(101,0) ColorTableScale=p
-  make/o /n=(101,4) ColorTableMain=p
+  make/o /n=(256,0) ColorTableScale=p
+  make/o /n=(256,4) ColorTableMain=p
   make/o /n=(3) ColorTableMainB={5888,9216,39424}
   make/o /n=(3) ColorTableMainG={56832,7168,16384}
   make/o /n=(3) ColorTableMainR={65280,60672,8448}
@@ -848,9 +1084,7 @@ function RecreateWaves()
   variable/g ColorSepAxis2=  4
   variable/g ColorBrightness=  3
   variable/g Bright=  0
-  variable/g minscale=  0
-  variable/g tableupdate=  0
-  variable/g maxscale=  100
   string/g	CWname=""
  
 end
+
